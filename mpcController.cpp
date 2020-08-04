@@ -57,33 +57,27 @@ void MpcController::initialize()
 	Ed = S.block(0, As.cols() + Bs.cols(), Es.rows(), Es.cols());
 
 	/* state elimination */
-	MatrixXd Temp = MatrixXd::Zero(NSTATE * NP + NSTATE, 1);
-	MatrixXd Theta = MatrixXd::Zero(NSTATE * NP, NSTATE * NP);
-	//Phi = MatrixXd::Zero(NSTATE * NP, NSTATE);
-	//Gamma = MatrixXd::Zero(NSTATE * NP, NP);
-	//Ew = MatrixXd::Zero(NSTATE * NP, 1);
+	Phi = MatrixXd::Zero(NSTATE * NP, NSTATE);
+	Gamma = MatrixXd::Zero(NSTATE * NP, NP);
+	Ew = MatrixXd::Zero(NSTATE * NP, NP);
+	MatrixXd Phi_part = MatrixXd::Identity(NSTATE, NSTATE);
+	MatrixXd Gamma_part = MatrixXd::Zero(NSTATE, NP);
+	MatrixXd Ew_part = MatrixXd::Zero(NSTATE, NP);
 
-	for (int i = 0; i <= NP; i++)
+	for (size_t i = 0; i < NP; i++)
 	{
-		Temp.block<NSTATE, NSTATE>(NSTATE * i, 0) = Ad.pow(i).block<NSTATE, NSTATE>(0, 0);            // iterative product cost less time?
-	}
-	Phi = Temp.block<NSTATE * NP, NSTATE>(NSTATE, 0);
+		Phi_part = Ad * Phi_part;
+		Phi.block<NSTATE, NSTATE>(NSTATE*i, 0) = Phi_part;
 
-	for (int i = 0; i < NP; i++)
-	{
-		Theta.block(NSTATE * i, NSTATE * i, NSTATE * (NP - i), NSTATE) = Temp.block(0, 0, NSTATE * (NP - i), NSTATE);
-	}
+		MatrixXd Ew_tmp = MatrixXd::Zero(NSTATE, NP);
+		Ew_tmp.block<NSTATE, 1>(0, i) = Ed;
+		Ew_part = Ad * Ew_part + Ew_tmp;
+		Ew.block<NSTATE, NP>(NSTATE*i, 0) = Ew_part;
 
-	MatrixXd Bd_tmp = MatrixXd::Zero(NSTATE * NP, NP);
-
-	if (nblkdiag(Bd, Bd_tmp, NP))
-	{
-		Gamma = Theta * Bd_tmp;
-		Ew = Theta * Ed.replicate(NP, 1);
-	}
-	else
-	{
-		throw "The size of B_tmp is incorrect!";
+		MatrixXd Gamma_tmp(NSTATE, NP);
+		Gamma_tmp << MatrixXd::Zero(NSTATE, i), Bd, MatrixXd::Zero(NSTATE, NP - i - 1);
+		Gamma_part = A * Gamma_part + Gamma_tmp;
+		Gamma.block<NSTATE, NP>(NSTATE*i, 0) = Gamma_part;
 	}
 
 	/* difference matrix, need to change when more than 1 input */
