@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 		return 31;
 	}
 
-	auto p_C_to_DS = (double*)MapViewOfFile(hSharedMemory_C_to_DS, FILE_MAP_ALL_ACCESS, NULL, NULL, size);
+	auto p_C_to_DS = (float*)MapViewOfFile(hSharedMemory_C_to_DS, FILE_MAP_ALL_ACCESS, NULL, NULL, size);
 
 	/* read data and output control command */
 	long frameCount = 0;
@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
 			mpcController.updateModel(p_DS_to_C, s_index);
 			mpcController.step();
 			double *next = mpcController.getOutput();
-			*p_C_to_DS = next[0] * Kt * RAD2DEG;
+			*p_C_to_DS = (float)next[0] * Kt * RAD2DEG;
 			control_command.push_back(*p_C_to_DS);
 			cout << "The next steering angle is " << *p_C_to_DS << endl;
 		}
