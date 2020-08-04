@@ -76,7 +76,7 @@ void MpcController::initialize()
 
 		MatrixXd Gamma_tmp(NSTATE, NP);
 		Gamma_tmp << MatrixXd::Zero(NSTATE, i), Bd, MatrixXd::Zero(NSTATE, NP - i - 1);
-		Gamma_part = A * Gamma_part + Gamma_tmp;
+		Gamma_part = Ad * Gamma_part + Gamma_tmp;
 		Gamma.block<NSTATE, NP>(NSTATE*i, 0) = Gamma_part;
 	}
 
