@@ -11,6 +11,37 @@ int nblkdiag(MatrixXd &M, MatrixXd &N, int n)
 	return 1;
 }
 
+void readState(ifstream &source, vector<CAR_STATE> &states)
+{
+	while (source)
+	{
+		string s;
+		if (!getline(source, s)) break;
+		istringstream ss(s);
+		vector<string> line;
+		while (ss)
+		{
+			string str_data;
+			if (!getline(ss, str_data, ',')) break;
+			line.emplace_back(str_data);
+		}
+		CAR_STATE state;
+		state.lTotalFrame = stol(line[0]);
+		state.dtime = stod(line[1]);
+		state.fSpeed = stof(line[2]);
+		state.dPos[0] = stod(line[3]);
+		state.dPos[1] = stod(line[4]);
+		state.dPos[2] = stod(line[5]);
+		state.dAng[0] = stod(line[6]);
+		state.dAng[1] = stod(line[7]);
+		state.dAng[2] = stod(line[8]);
+		state.yawRate = stod(line[9]);
+		state.dBeta = stod(line[10]);
+		state.fStrBeta = stod(line[11]);
+		states.push_back(state);
+	}
+}
+
 void MpcController::initialize()
 {
 	int ref_flag = loadReference("path.csv");
@@ -18,7 +49,7 @@ void MpcController::initialize()
 	{
 		throw "Failed to load reference path!";
 	}
-	kappa = -1 / 200;
+	kappa = 1 / 201.5;
 	Vx = 60 / 3.6;
 
 	RowVectorXd WeightRu(1), WeightRdu(1);
@@ -34,7 +65,6 @@ void MpcController::initialize()
 	Ru = WRu.asDiagonal();
 	Rdu = WRdu.asDiagonal();
 
-	A = MatrixXd::Zero(rows, cols);
 	MatrixXd As(NSTATE, NSTATE), Ad(NSTATE, NSTATE), Bs(NSTATE, 1), Bd(NSTATE, 1), Es(NSTATE, 1), Ed(NSTATE, 1);
 	As << -2*(CClassHatchback.CF + CClassHatchback.CR) / (CClassHatchback.MASS*Vx), 2*(CClassHatchback.CR*CClassHatchback.LRAXIS - CClassHatchback.CF*CClassHatchback.LFAXIS) / (CClassHatchback.MASS*Vx*Vx) - 1, 0, 0,
 		2*(CClassHatchback.CR*CClassHatchback.LRAXIS - CClassHatchback.CF*CClassHatchback.LFAXIS) / CClassHatchback.IZ, -2 * (CClassHatchback.CF*CClassHatchback.LFAXIS*CClassHatchback.LFAXIS + CClassHatchback.CR*CClassHatchback.LRAXIS*CClassHatchback.LRAXIS) / (CClassHatchback.IZ*Vx), 0, 0,
@@ -87,8 +117,41 @@ void MpcController::initialize()
 	C += C1;
 
 	/* H, f, A, b determination */
-	H = Gamma.transpose()*Q*Gamma + Ru + C.transpose()*Rdu*C;
-	A << C, -C;
+	MatrixXd H = Gamma.transpose()*Q*Gamma + Ru + C.transpose()*Rdu*C;
+	//A = MatrixXd(rows, cols);
+	//A << C, -C;
+
+	double q[cols][cols], a[rows][cols], lb[cols], ub[cols];
+	char sense[rows];
+
+	for (size_t i = 0; i < cols; i++)
+	{
+		lb[i] = -UMAX;
+		ub[i] = UMAX;
+	}
+	//for (size_t i = 0; i < rows; i++)
+	//{
+	//	sense[i] = '<';
+	//}
+
+	vars = model->addVars(lb, ub, NULL, NULL, NULL, cols);
+
+	Map<Matrix<double, cols, cols, RowMajor>>(&q[0][0], cols, cols) = H;
+	//Map<Matrix<double, rows, cols, RowMajor>>(&a[0][0], rows, cols) = A;
+	
+	int i, j;
+	for (i = 0; i < cols; i++)
+		for (j = 0; j < cols; j++)
+			if (q[i*cols + j] != 0)
+				obj_h += q[i][j] * vars[i] * vars[j];
+
+	for (i = 0; i < cols-1; i++)
+	{
+		GRBLinExpr lhs = 0;
+		lhs += vars[i] - vars[i + 1];
+		model->addConstr(lhs, '<', DUMAX);
+		model->addConstr(lhs, '>', -DUMAX);
+	}
 }
 
 int MpcController::loadReference(const string fileName)
@@ -124,6 +187,7 @@ void MpcController::updateModel(CAR_STATE *currentState, size_t &s_index)
 	double d_offset = 0;
 	double phi_offset = 0;
 	double v_lat = 0;
+	int sgn = 1;
 
 	// d_offset to reference path
 	while (s_index <= ref_path.size() - 1)
@@ -136,12 +200,12 @@ void MpcController::updateModel(CAR_STATE *currentState, size_t &s_index)
 		if (angle < PI / 2) s_index++;
 		else
 		{
-			d_offset = v.norm()*sin(angle);
+			sgn = (curPos.orientation(ref_path[s_index - 1]) >= ref_path[s_index].orientation(ref_path[s_index - 1])) ? 1 : -1;
+			d_offset = v.norm()*sin(angle)*sgn;
 			break;
 		}
 	}
 
-	if (s_index == ref_path.size()) throw "reference scope is exceeded!";
 
 	// phi_offset to reference path
 	double head_angle = currentState->dAng[2];
@@ -157,41 +221,48 @@ void MpcController::updateModel(CAR_STATE *currentState, size_t &s_index)
 	/* H, f, A, b determination */
 	VectorXd z(4);
 	z << currentState->dBeta, currentState->yawRate, phi_offset, d_offset;
-	VectorXd u_pre = VectorXd::Zero(cols);
+
 	VectorXd dist = VectorXd::Ones(cols) * kappa;
+	VectorXd u_pre = VectorXd::Zero(cols);
 	u_pre(0) = currentState->fStrBeta*DEG2RAD;
 	f = (Phi * z + Ew * dist).transpose() * Q * Gamma - u_pre.transpose()*Rdu*C;
-	VectorXd b_tmp;
-	b_tmp << u_pre, -u_pre;
-	b = VectorXd::Ones(rows)*DUMAX + b_tmp;
+	double *c = f.data();
+	GRBQuadExpr obj_f = 0;
+	for (int i = 0; i < cols; i++)
+	{
+		obj_f += c[i] * vars[i];
+	}
+
+	model->addConstr(vars[0], '<', u_pre(0) + DUMAX, "next_input_ub");
+	model->addConstr(vars[0], '>', u_pre(0) - DUMAX, "next_input_lb");
+	GRBQuadExpr obj = obj_h + obj_f;
+	model->setObjective(obj);
 }
 
 void MpcController::step()
 {
 	try
 	{
-		double *c = f.data();
-		double *rhs = b.data();
-		double q[cols][cols], a[rows][cols], lb[cols], ub[cols], objval;
-		char sense[rows];
-		for (size_t i = 0; i < cols; i++)
-		{
-			lb[i] = -UMAX;
-			ub[i] = UMAX;
-		}
-		for (size_t i = 0; i < rows; i++)
-		{
-			sense[i] = '<';
-		}
-		bool success;
+		double objval;
 
-		Map<Matrix<double, cols, cols, RowMajor>>(&q[0][0], cols, cols) = H;
-		Map<Matrix<double, rows, cols, RowMajor>>(&a[0][0], rows, cols) = A;
+		for (size_t i = 0; i < cols-1; i++)
+		{
+			vars[i].set(GRB_DoubleAttr_Start, sol[i + 1]);
+		}
 
-		success = this->dense_optimization(c, &q[0][0], &a[0][0], sense, rhs, lb, ub, NULL, sol, &objval);
-		cout << "solution if found" << endl;
-		//for (size_t i = 0; i < NP; i++) cout << sol[i] << endl;
-		u_next[0] = sol[0];
+		model->optimize();
+		GRBQuadExpr thisObj = model->getObjective();
+		if (model->get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
+			objval = model->get(GRB_DoubleAttr_ObjVal);
+			for (int i = 0; i < cols; i++)
+			{
+				sol[i] = vars[i].get(GRB_DoubleAttr_X);
+			}
+			u_next[0] = sol[0];
+		}
+		model->remove(model->getConstrByName("next_input_ub"));
+		model->remove(model->getConstrByName("next_input_lb"));
+		model->update();
 	}
 	catch (GRBException e)
 	{
@@ -211,57 +282,24 @@ void MpcController::terminate()
 MpcController::MpcController()
 {
 	env = new GRBEnv();
+	model = new GRBModel(*env);
+	obj_h = 0;
+	fill_n(sol, cols, 0.0);
 }
 
 MpcController::~MpcController()
 {
 	delete env;
+	delete model;
+	env = nullptr;
+	model = nullptr;
+	if (vars != nullptr)
+	{
+		delete vars;
+		vars = nullptr;
+	}
 }
 
-bool MpcController::dense_optimization(double * c, double * q, double * a, char * sense, double * rhs, double * lb, double * ub, char * vtype, double * solution, double * objvalP)
-{
-	GRBModel model = GRBModel(*env);
-	int i, j;
-	bool success = false;
-
-	/* Add variables to the model */
-
-	GRBVar* vars = model.addVars(lb, ub, NULL, vtype, NULL, cols);
-
-	/* Populate A matrix */
-
-	for (i = 0; i < rows; i++) {
-		GRBLinExpr lhs = 0;
-		for (j = 0; j < cols; j++)
-			if (a[i*cols + j] != 0)
-				lhs += a[i*cols + j] * vars[j];
-		model.addConstr(lhs, sense[i], rhs[i]);
-	}
-
-	GRBQuadExpr obj = 0;
-
-	for (j = 0; j < cols; j++)
-		obj += c[j] * vars[j];
-	for (i = 0; i < cols; i++)
-		for (j = 0; j < cols; j++)
-			if (q[i*cols + j] != 0)
-				obj += q[i*cols + j] * vars[i] * vars[j];
-
-	model.setObjective(obj);
-
-	model.optimize();
-
-	if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
-		*objvalP = model.get(GRB_DoubleAttr_ObjVal);
-		for (i = 0; i < cols; i++)
-			solution[i] = vars[i].get(GRB_DoubleAttr_X);
-		success = true;
-	}
-
-	delete[] vars;
-
-	return success;
-}
 
 double* MpcController::getOutput()
 {
