@@ -14,8 +14,8 @@ using namespace Eigen;
 
 #define TS 0.025
 #define NP 30
-#define UMAX 0.35
-#define DUMAX 0.02
+constexpr double UMAX = 0.35;
+constexpr double DUMAX = 0.02;
 #define Kt 17
 #define EPS 1e-6
 #define PI 3.1415926
@@ -55,6 +55,11 @@ public:
 		Vector2d u(x_, y_);
 		return u;
 	}
+
+	double orientation(Point &p)
+	{
+		return atan2(y - p.y, x - p.x);
+	}
 };
 
 
@@ -78,9 +83,9 @@ public:
 	double Vx;
 
 	MatrixXd Q, Ru, Rdu;
-	MatrixXd H, A;
 	VectorXd f, b;
 	MatrixXd Phi, Gamma, Ew;
+
 
 	/* model initialize function */
 	void initialize();
@@ -108,6 +113,10 @@ private:
 	static P_vehicle CClassHatchback;
 	static P_controller P_MPC;
 	vector<Point> ref_path;
+	GRBModel *model;
+	GRBVar* vars;
+	GRBQuadExpr obj_h;
 
-	bool dense_optimization(double* c, double* q, double* a, char*   sense, double* rhs, double* lb, double* ub, char* vtype, double* solution, double* objvalP);
 };
+
+void readState(ifstream & source, vector<CAR_STATE>& states);
