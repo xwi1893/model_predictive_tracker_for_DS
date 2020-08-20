@@ -10,10 +10,10 @@ Kinematic_Vehicle Planner_mpc::Car{
 	1.635,
 
 	// len to front end
-	1.915,
+	1.375,
 
 	// len to rear end
-	2.835,
+	3.025,
 
 	// width
 	1.725
