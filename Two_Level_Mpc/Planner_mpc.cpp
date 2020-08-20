@@ -289,6 +289,7 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path)
 	if (!planner_z_isInitialized)
 	{
 		if (past_path.size() > 0) past_path.clear();
+		s_index = 1;
 		double d_offset = 0;
 		double phi_offset = 0;
 		double kappa = 0;
@@ -297,7 +298,6 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path)
 			// d_offset to reference path
 			while (s_index <= ref_path.size() - 1)
 			{
-				if (s_index == 0) s_index++;
 				Vector2d u = ref_path.waypoints[s_index] - ref_path.waypoints[s_index - 1];
 				Vector2d v = currentPos - ref_path.waypoints[s_index];
 
@@ -455,7 +455,6 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path)
 
 	// update currentS
 	currentS += vx * Tp;
-	s_index += 1;
 }
 
 
@@ -475,7 +474,10 @@ void Planner_mpc::threadStep(CAR_STATE * p_DS_to_C, Path & planned_path)
 
 		if (_kbhit() != 0) key = _getch();
 		if (key == 'q') terminate = true;
+		if (s_index >= ref_path.size()) terminate = true;
 	}
+
+	if (terminate) cout << "The planner is terminated!" << endl;
 }
 
 Point Planner_mpc::offset2Point(double d_offset, double phi_offset, Point & base_p)
