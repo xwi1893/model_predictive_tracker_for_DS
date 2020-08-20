@@ -16,7 +16,7 @@ public:
 	}
 	~Path() {}
 
-	Point linear_interpolation(double &x, size_t start_index = 1)
+	Point linear_interpolation(double x, size_t &start_index)
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
 		if (start_index < 1) start_index = 1;
