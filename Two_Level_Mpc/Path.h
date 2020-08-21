@@ -20,28 +20,35 @@ public:
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
 		if (start_index < 1) start_index = 1;
-		while (s[start_index] <= x)
+		Point *p1, *p2;
+		pair<double, double> ratio_pair;
+
+		if (s[start_index] <= x)
 		{
-			if ((s[start_index + 1] > x) | (start_index == s.size() - 1)) {
-				auto ratio_pair = intersect(s[start_index], s[start_index + 1], x);
-				double px = ratio_pair.first*waypoints[start_index].x + ratio_pair.second*waypoints[start_index + 1].x;
-				double py = ratio_pair.first*waypoints[start_index].y + ratio_pair.second*waypoints[start_index + 1].y;
-				double ptheta = ratio_pair.first*waypoints[start_index].theta + ratio_pair.second*waypoints[start_index + 1].theta;
-				return Point(px, py, ptheta);
+			while (start_index < s.size() - 2)
+			{
+				if (s[start_index + 1] > x) break;
+				else start_index++;
 			}
-			else start_index++;
+			ratio_pair = intersect(s[start_index], s[start_index + 1], x);
+			p1 = &waypoints[start_index];
+			p2 = &waypoints[start_index + 1];
 		}
-		while (s[start_index] > x)
+		else
 		{
-			if ((s[start_index - 1] <= x) | (start_index == 1)) {
-				auto ratio_pair = intersect(s[start_index - 1], s[start_index], x);
-				double px = ratio_pair.first*waypoints[start_index - 1].x + ratio_pair.second*waypoints[start_index].x;
-				double py = ratio_pair.first*waypoints[start_index - 1].y + ratio_pair.second*waypoints[start_index].y;
-				double ptheta = ratio_pair.first*waypoints[start_index - 1].theta + ratio_pair.second*waypoints[start_index].theta;
-				return Point(px, py, ptheta);
+			while (start_index > 1)
+			{
+				if (s[start_index - 1] < x) break;
+				else start_index--;
 			}
-			else start_index--;
+			ratio_pair = intersect(s[start_index - 1], s[start_index], x);
+			p1 = &waypoints[start_index - 1];
+			p2 = &waypoints[start_index];
 		}
+		double px = ratio_pair.first*p1->x + ratio_pair.second*p2->x;
+		double py = ratio_pair.first*p1->y + ratio_pair.second*p2->y;
+		double ptheta = ratio_pair.first*p1->theta + ratio_pair.second*p2->theta;
+		return Point(px, py, ptheta);
 	}
 
 	void linear_interpolation(vector<double> &x, vector<Point> &pointPre, size_t start_index = 1)
@@ -49,33 +56,38 @@ public:
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
 		vector<double> &sSample = s;
 		if (start_index < 1) start_index = 1;
+
+		Point *p1, *p2;
+		pair<double, double> ratio_pair;
 		for (auto iter = x.begin(); iter != x.end(); iter++)
 		{
-			while (sSample[start_index] <= *iter)
+			if (sSample[start_index] <= *iter)
 			{
-				if ((sSample[start_index + 1] > *iter) | (start_index == sSample.size() - 1)) {
-					auto ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
-					double px = ratio_pair.first*waypoints[start_index].x + ratio_pair.second*waypoints[start_index + 1].x;
-					double py = ratio_pair.first*waypoints[start_index].y + ratio_pair.second*waypoints[start_index + 1].y;
-					double ptheta = ratio_pair.first*waypoints[start_index].theta + ratio_pair.second*waypoints[start_index + 1].theta;
-					pointPre.emplace_back(px, py, ptheta);
-					break;
+				while (start_index < sSample.size() - 2)
+				{
+					if (sSample[start_index + 1] > *iter) break;
+					else start_index++;
 				}
-				else start_index++;
+				ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
+				p1 = &waypoints[start_index];
+				p2 = &waypoints[start_index + 1];
 			}
-			while (sSample[start_index] > *iter)
+			else
 			{
-				if ((sSample[start_index - 1] <= *iter) | (start_index == 1)) {
-					auto ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
-					double px = ratio_pair.first*waypoints[start_index - 1].x + ratio_pair.second*waypoints[start_index].x;
-					double py = ratio_pair.first*waypoints[start_index - 1].y + ratio_pair.second*waypoints[start_index].y;
-					double ptheta = ratio_pair.first*waypoints[start_index - 1].theta + ratio_pair.second*waypoints[start_index].theta;
-					pointPre.emplace_back(px, py, ptheta);
-					break;
+				while (start_index > 1)
+				{
+					if (sSample[start_index - 1] < *iter) break;
+					else start_index--;
 				}
+				ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
+				p1 = &waypoints[start_index - 1];
+				p2 = &waypoints[start_index];
+			}
 
-				else start_index--;
-			}
+			double px = ratio_pair.first*p1->x + ratio_pair.second*p2->x;
+			double py = ratio_pair.first*p1->y + ratio_pair.second*p2->y;
+			double ptheta = ratio_pair.first*p1->theta + ratio_pair.second*p2->theta;
+			pointPre.emplace_back(px, py, ptheta);
 		}
 	}
 
