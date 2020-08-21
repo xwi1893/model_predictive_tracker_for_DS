@@ -95,30 +95,34 @@ public:
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
 		vector<double> &sSample = s;
+		double *k1, *k2;
+		pair<double, double> ratio_pair;
 		for (auto iter = x.begin(); iter != x.end(); iter++)
 		{
-			while (sSample[start_index] <= *iter)
+			if (sSample[start_index] <= *iter)
 			{
-				if ((sSample[start_index + 1] > *iter) | (start_index == sSample.size() - 1)) {
-					auto ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
-					double pKappa = ratio_pair.first*kappa[start_index] + ratio_pair.second*kappa[start_index + 1];
-					kappaPre.push_back(pKappa);
-					break;
+				while (start_index < sSample.size() - 2)
+				{
+					if (sSample[start_index + 1] > *iter) break;
+					else start_index++;
 				}
-				else start_index++;
+				ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
+				k1 = &kappa[start_index];
+				k2 = &kappa[start_index + 1];
 			}
-			while (sSample[start_index] > *iter)
+			else
 			{
-				if ((sSample[start_index - 1] <= *iter) | (start_index == 1)) {
-					auto ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
-					double pKappa = ratio_pair.first*kappa[start_index - 1] + ratio_pair.second*kappa[start_index];
-					kappaPre.push_back(pKappa);
-
-					break;
+				while (start_index > 1)
+				{
+					if (sSample[start_index - 1] < *iter) break;
+					else start_index--;
 				}
-
-				else start_index--;
+				ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
+				k1 = &kappa[start_index - 1];
+				k2 = &kappa[start_index];
 			}
+			double pKappa = ratio_pair.first*(*k1) + ratio_pair.second*(*k2);
+			kappaPre.push_back(pKappa);
 		}
 	}
 
