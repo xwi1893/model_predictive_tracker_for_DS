@@ -19,110 +19,79 @@ public:
 	Point linear_interpolation(double x, size_t &start_index)
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
-		if (start_index < 1) start_index = 1;
+		if (start_index < 1 || start_index >= s.size() - 1) start_index = 1;
 		Point *p1, *p2;
-		pair<double, double> ratio_pair;
-
-		if (s[start_index] <= x)
-		{
-			while (start_index < s.size() - 2)
-			{
-				if (s[start_index + 1] > x) break;
-				else start_index++;
-			}
-			ratio_pair = intersect(s[start_index], s[start_index + 1], x);
-			p1 = &waypoints[start_index];
-			p2 = &waypoints[start_index + 1];
+		int i1, i2;
+		if (s[start_index] <= x) {
+			i1 = start_index;
+			i2 = s.size() - 1;
 		}
 		else
 		{
-			while (start_index > 1)
-			{
-				if (s[start_index - 1] < x) break;
-				else start_index--;
-			}
-			ratio_pair = intersect(s[start_index - 1], s[start_index], x);
-			p1 = &waypoints[start_index - 1];
-			p2 = &waypoints[start_index];
+			i1 = 0;
+			i2 = start_index;
 		}
+
+		while (i2 - i1 > 1)
+		{
+			int i_tmp = (i1 + i2) / 2;
+			if (s[i_tmp] <= x) i1 = i_tmp;
+			else i2 = i_tmp;
+		}
+		start_index = (size_t)i1;
+		auto ratio_pair = intersect(s[i1], s[i2], x);
+		p1 = &waypoints[i1];
+		p2 = &waypoints[i2];
+		
 		double px = ratio_pair.first*p1->x + ratio_pair.second*p2->x;
 		double py = ratio_pair.first*p1->y + ratio_pair.second*p2->y;
 		double ptheta = ratio_pair.first*p1->theta + ratio_pair.second*p2->theta;
 		return Point(px, py, ptheta);
 	}
 
-	void linear_interpolation(vector<double> &x, vector<Point> &pointPre, size_t start_index = 1)
+	void linear_interpolation(vector<double> &x, vector<Point> &pointPre)
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
-		vector<double> &sSample = s;
-		if (start_index < 1) start_index = 1;
+		size_t start_index = s.size() / 2;
+		linear_interpolation(x[0], start_index);
 
-		Point *p1, *p2;
-		pair<double, double> ratio_pair;
 		for (auto iter = x.begin(); iter != x.end(); iter++)
 		{
-			if (sSample[start_index] <= *iter)
+			while (s[start_index] <= *iter)
 			{
-				while (start_index < sSample.size() - 2)
-				{
-					if (sSample[start_index + 1] > *iter) break;
-					else start_index++;
+				if ((s[start_index + 1] > *iter) || (start_index == s.size() - 2)) {
+					auto ratio_pair = intersect(s[start_index], s[start_index + 1], *iter);
+					Point &p1 = waypoints[start_index];
+					Point &p2 = waypoints[start_index + 1];
+					double px = ratio_pair.first*p1.x + ratio_pair.second*p2.x;
+					double py = ratio_pair.first*p1.y + ratio_pair.second*p2.y;
+					double ptheta = ratio_pair.first*p1.theta + ratio_pair.second*p2.theta;
+					pointPre.emplace_back(px, py, ptheta);
+					break;
 				}
-				ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
-				p1 = &waypoints[start_index];
-				p2 = &waypoints[start_index + 1];
+				else start_index++;
 			}
-			else
-			{
-				while (start_index > 1)
-				{
-					if (sSample[start_index - 1] < *iter) break;
-					else start_index--;
-				}
-				ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
-				p1 = &waypoints[start_index - 1];
-				p2 = &waypoints[start_index];
-			}
-
-			double px = ratio_pair.first*p1->x + ratio_pair.second*p2->x;
-			double py = ratio_pair.first*p1->y + ratio_pair.second*p2->y;
-			double ptheta = ratio_pair.first*p1->theta + ratio_pair.second*p2->theta;
-			pointPre.emplace_back(px, py, ptheta);
 		}
 	}
 
-	void linear_interpolation(vector<double> &x, vector<double> &kappaPre, size_t start_index = 0)
+	void linear_interpolation(vector<double> &x, vector<double> &kappaPre)
 	{
 		auto intersect = [](double x0, double x1, double x) -> pair<double, double> {return make_pair((x1 - x) / (x1 - x0), (x - x0) / (x1 - x0)); };
-		vector<double> &sSample = s;
-		double *k1, *k2;
-		pair<double, double> ratio_pair;
+		size_t start_index = s.size() / 2;
+		linear_interpolation(x[0], start_index);
+
 		for (auto iter = x.begin(); iter != x.end(); iter++)
 		{
-			if (sSample[start_index] <= *iter)
+			while (s[start_index] <= *iter)
 			{
-				while (start_index < sSample.size() - 2)
-				{
-					if (sSample[start_index + 1] > *iter) break;
-					else start_index++;
+				if ((s[start_index + 1] > *iter) || (start_index == s.size() - 2)) {
+					auto ratio_pair = intersect(s[start_index], s[start_index + 1], *iter);
+					double pKappa = ratio_pair.first*kappa[start_index] + ratio_pair.second*kappa[start_index + 1];
+					kappaPre.push_back(pKappa);
+					break;
 				}
-				ratio_pair = intersect(sSample[start_index], sSample[start_index + 1], *iter);
-				k1 = &kappa[start_index];
-				k2 = &kappa[start_index + 1];
+				else start_index++;
 			}
-			else
-			{
-				while (start_index > 1)
-				{
-					if (sSample[start_index - 1] < *iter) break;
-					else start_index--;
-				}
-				ratio_pair = intersect(sSample[start_index - 1], sSample[start_index], *iter);
-				k1 = &kappa[start_index - 1];
-				k2 = &kappa[start_index];
-			}
-			double pKappa = ratio_pair.first*(*k1) + ratio_pair.second*(*k2);
-			kappaPre.push_back(pKappa);
 		}
 	}
 
