@@ -290,10 +290,10 @@ void Tracker_mpc::updateModel(CAR_STATE *currentState, Path &planned_path)
 
 	if (ref_path.size() > 0)
 	{
-		ref_path.linear_interpolation(predictS_rear, predictPoint_rear, s_index);
-		ref_path.linear_interpolation(predictS, predictPoint, s_index);
-		linear_interpolation(predictS, predictKappa, ref_path.s, ref_path.kappa, s_index);
-		ref_path.linear_interpolation(predictS_front, predictPoint_front, s_index);
+		ref_path.linear_interpolation(predictS_rear, predictPoint_rear);
+		ref_path.linear_interpolation(predictS, predictPoint);
+		ref_path.linear_interpolation(predictS, predictKappa);
+		ref_path.linear_interpolation(predictS_front, predictPoint_front);
 	}
 
 
@@ -304,7 +304,6 @@ void Tracker_mpc::updateModel(CAR_STATE *currentState, Path &planned_path)
 	C += C1;
 
 	/* H, f, A, b determination */
-	double kappa = 0;
 	VectorXd z(NSTATE);
 	z << currentState->dBeta, currentState->yawRate, phi_offset, d_offset;              // column vector is default.
 	VectorXd u_pre = VectorXd::Zero(cols);
@@ -416,6 +415,7 @@ void Tracker_mpc::step()
 		{
 			model->remove(constr);
 		}
+		env_con.clear();
 		model->update();
 	}
 	catch (GRBException e)
