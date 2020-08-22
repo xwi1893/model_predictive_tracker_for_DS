@@ -21,7 +21,7 @@ Kinematic_Vehicle Planner_mpc::Car{
 
 P_controller Planner_mpc::P_Planner{
 	// weight Q, weight epsilon, weight eta
-	{0.1, 10, 1, 10000, 100},
+	{0.1, 10, 0, 10000, 100},
 	// weight R,
 	{0.1},
 	// weight delta u
@@ -337,9 +337,9 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path)
 		predictS_front.emplace_back(currentS + vx * i*Tp + (Car.LF + Car.LR)/3.0);
 	}
 		
-	ref_path.linear_interpolation(predictS_rear, predictPoint_rear, s_index);
-	ref_path.linear_interpolation(predictS, predictPoint, s_index);
-	ref_path.linear_interpolation(predictS_front, predictPoint_front, s_index);
+	ref_path.linear_interpolation(predictS_rear, predictPoint_rear);
+	ref_path.linear_interpolation(predictS, predictPoint);
+	ref_path.linear_interpolation(predictS_front, predictPoint_front);
 
 
 	/* calculate h_con, use predicted point to determine left and right bound */
