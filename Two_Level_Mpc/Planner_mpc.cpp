@@ -482,7 +482,7 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path, MPC &tracke
 	catch (...)
 	{
 		cout << "Exception during optimization" << endl;
-	}q
+	}
 }
 
 
