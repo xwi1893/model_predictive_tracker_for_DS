@@ -80,12 +80,12 @@ void Planner_mpc::initialize(double Vx, vector<Point> &bound)
 
 	/* construct discrete matrices(Tp = 0.1) */
 	MatrixXd Ad(NSTATE, NSTATE), Bd1(NSTATE, NINPUT), Bd2(NSTATE, NINPUT), Ed(NSTATE, 1);
-	Ad << 1, 1.944444, 1.890432,
-		0, 1, 1.944444,
+	Ad << 1, 1.66666666666667, 1.38888888888889,
+		0, 1, 1.66666666666667,
 		0, 0, 1;
-	Bd1 << 0.047261, 0.064815, 0.05;
-	Bd2 << 0.015754, 0.032407, 0.05;
-	Ed << -1.944444, 0, 0;
+	Bd1 << 0.0347222222222222, 0.0555555555555556, 0.05;
+	Bd2 << 0.0115740740740741, 0.0277777777777778, 0.05;
+	Ed << -1.66666666666667, 0, 0;
 
 	/* state elimination */
 	Phi = MatrixXd::Zero(NSTATE * NP, NSTATE);
@@ -258,17 +258,17 @@ int Planner_mpc::loadBound(vector<Point>& bound, vector<Point> &newBound, double
 	int i;
 	double theta;
 	int sign;
-	if (dir == "right") sign = 1;
-	else if (dir == "left") sign = -1;
+	if (dir == "right") sign = -1;
+	else if (dir == "left") sign = 1;
 	for (i = 0; i < bound.size(); i++)
 	{
 		Vector2d r_vec;
+		double scaler = r;
 		if (i == 0) {
 			Vector2d segment = bound[i + 1] - bound[i];
 			Matrix2d R;
 			R << 0, -1, 1, 0;
 			r_vec = R * segment;
-
 		}
 		else if (i >= 1 && i < bound.size() - 1)
 		{
@@ -279,6 +279,7 @@ int Planner_mpc::loadBound(vector<Point>& bound, vector<Point> &newBound, double
 			Matrix2d R;
 			R << cos(theta), -sin(theta), sin(theta), cos(theta);
 			r_vec = R * v1;
+			scaler = abs(scaler / sin(theta));
 		}
 		else if (i == bound.size() - 1)
 		{
@@ -287,7 +288,7 @@ int Planner_mpc::loadBound(vector<Point>& bound, vector<Point> &newBound, double
 			R << 0, -1, 1, 0;
 			r_vec = R * v;
 		}
-		r_vec = r_vec / r_vec.norm() *r*sign;
+		r_vec = r_vec / r_vec.norm() *scaler*sign;
 		Point a = bound[i] + r_vec;
 		newBound.emplace_back(a);
 	}
@@ -386,8 +387,8 @@ void Planner_mpc::step(CAR_STATE *currentState, Path & planned_path, MPC &tracke
 
 	/* set model objective */
 	f = RowVectorXd::Zero(cols);
-	f.head(NC) = (Phi * planner_z + Ew * w).transpose() * Q * Gamma;  // vector uses head(), tail(), segment(p, q).
-	//f.head(NC) = (Phi*planner_z + Ew * w - zRef).transpose()*Q*Gamma;
+	f.head(NC) = 2 * (Phi * planner_z + Ew * w).transpose() * Q * Gamma;  // vector uses head(), tail(), segment(p, q).
+	//f.head(NC) = 2 * (Phi*planner_z + Ew * w - zRef).transpose()*Q*Gamma;
 	f(NC) = P_Planner.WeightQ[3];
 
 	double *c = f.data();
