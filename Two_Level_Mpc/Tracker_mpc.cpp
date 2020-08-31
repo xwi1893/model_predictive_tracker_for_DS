@@ -37,7 +37,7 @@ P_controller Tracker_mpc::P_TRACKER{
 	{0.1},
 
 	// Weight Rdu
-	{100},
+	{10},
 
 	// Maximum input
 	0.35,
