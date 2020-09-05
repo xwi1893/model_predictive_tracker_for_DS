@@ -22,6 +22,12 @@ int main(int argc, char *argv[])
 	}
 
 	auto p_DS_to_C = (CAR_STATE*)MapViewOfFile(hSharedMemory_DS_to_C, FILE_MAP_ALL_ACCESS, NULL, NULL, size);
+	HANDLE DS_to_C_Mutex = OpenMutex(MUTEX_ALL_ACCESS, FALSE, "DS_to_C_Mutex");
+	
+	if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+		cout << "OpenMutex fail: file not found!" << endl; 
+		return -1;
+	}
 
 	HANDLE hSharedMemory_C_to_DS;
 	hSharedMemory_C_to_DS = OpenFileMapping(
@@ -37,6 +43,12 @@ int main(int argc, char *argv[])
 	}
 
 	auto p_C_to_DS = (float*)MapViewOfFile(hSharedMemory_C_to_DS, FILE_MAP_ALL_ACCESS, NULL, NULL, size);
+	HANDLE C_to_DS_Mutex = OpenMutex(MUTEX_ALL_ACCESS, FALSE, "C_to_DS_Mutex");
+	
+	if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+		cout << "OpenMutex fail: file not found!" << endl; 
+		return -1;
+	}
 
 	/* Planner & controller initialize */
 	GRBEnv *env = new GRBEnv();
