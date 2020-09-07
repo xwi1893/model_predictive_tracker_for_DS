@@ -32,7 +32,7 @@ P_vehicle Tracker_mpc::Car{
 	0.0271,                            // ar_max = ar_max - delta_r, delta_r = 0.014.
 
 	//gamma_max
-	0.2189
+	0.4379
 };
 
 P_controller Tracker_mpc::P_TRACKER{
