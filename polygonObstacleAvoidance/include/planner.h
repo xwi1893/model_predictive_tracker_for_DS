@@ -42,11 +42,8 @@ public:
 	/* model initialize function */
 	void initialize(double vCar);
 
-	/* update obstacle info */
-	void updateObstacles(CAR_STATE* currentState);
-
 	/* model step function */
-	void step(CAR_STATE * currentState, Path & planned_path, Environment& env);
+	solver_int32_default step(CAR_STATE * currentState, Path & planned_path, Environment& env);
 
 	/* thread function of model step */
 	void threadStep(CAR_STATE * beginState, Path & planned_path, Environment& env);
@@ -83,13 +80,13 @@ private:
 	bool terminate = false;
 	bool isOutputOptimal = true;
 	double currentS;
+	vector<double> dkappads;
 
 	myMPC_FORCESPro_params params;
 	myMPC_FORCESPro_info info;
 	myMPC_FORCESPro_output output;
 	FILE* fp;
 
-public:
 	MatrixXd A_Tc, B_Tc, D_Tc;
 	vector<MatrixXd> GAMMA;
 	VectorXd D;

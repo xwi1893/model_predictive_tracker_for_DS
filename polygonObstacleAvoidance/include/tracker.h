@@ -31,7 +31,7 @@ public:
 	void initialize();
 
 	/* model step function */
-	solver_int32_default step(CAR_STATE *currentState);
+	solver_int32_default step(CAR_STATE *currentState, Path& planned_path);
 
 	/* get output */
 	double *getOutput();
@@ -55,7 +55,7 @@ private:
 	double u_next[1];
 	double vx;
 
-	MatrixXd A, D;
+	MatrixXd A, D, mat_H;
 
 	MpcTracker_params params;
 	MpcTracker_info info;

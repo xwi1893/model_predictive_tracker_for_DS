@@ -20,6 +20,7 @@ public:
 		clear();
 		ifstream file;
 		file.open(fileName, ios::in);
+		if (!file.good()) return 0;
 
 		while (file)
 		{

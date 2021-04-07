@@ -99,6 +99,7 @@ public:
 		bool isNeedReplan = false;
 		for (int i = 0; i < 5; i++) {
 			ST_MODEL_DATA& model = state->stModel[i];
+			if (model.hModeID == -1) continue;
 			bool isInObstacles = false;
 			for (auto it = obstacles.begin(); it != obstacles.end(); it++) {
 				if (it->ID == model.hModeID) {
@@ -110,9 +111,10 @@ public:
 
 			if (!isInObstacles && model.cDisp) {
 				MatrixXd Vobs(2, 4);
-				Vobs << -1, 1, 1, -1, -1, -1, 1, 1;
+				Vobs << 3.724, 3.724, -1.101, -1.101, -0.917, 0.917, 0.917, -0.917;
+				double tEnd = (model.fAccel > -0.01) ? state->dtime + 10 : state->dtime - model.fSpeed / model.fAccel;
 				Obstacle obs(model.hModeID, model.fPosX, model.fPosY, model.fSpeed, model.fAccel, model.fIsoYaw,
-					0, 0, 0, state->dtime, state->dtime - model.fSpeed / model.fAccel, Vobs, RIGHT);
+					0, PI / 4, 0, state->dtime, tEnd, Vobs, RIGHT);
 				obstacles.push_back(obs);
 				isNeedReplan = true;
 			}
@@ -123,16 +125,15 @@ public:
 		}
 	}
 
-	void threadStep(CAR_STATE* state, condition_variable& replanSig) {
+	void threadStep(CAR_STATE* state, Path& planned_path) {
 		long frameCount = 0;
-		int trackSteps = 0;
 		bool terminate = false;
 		while (!terminate) {
 			long cFrameCount = state->lTotalFrame;
-			if (cFrameCount >= frameCount + 1) {
+			if (cFrameCount > frameCount) {
 				frameCount = cFrameCount;
 				envLock.lock();
-				updateObstacles(state, replanSig);
+				updateObstacles(state, planned_path);
 				envLock.unlock();
 			}
 		}
