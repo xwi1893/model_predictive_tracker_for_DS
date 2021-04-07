@@ -1,5 +1,7 @@
 #include "planner.h"
 
+//using namespace std;
+
 static MatrixXd dR(double alpha0, double dalpha, double t) {
 	MatrixXd M(2, 2);
 	M << -dalpha * sin(alpha0 + dalpha * t), -dalpha * cos(alpha0 + dalpha * t),
@@ -28,7 +30,7 @@ static void MultiplyTV(vector<MatrixXd>& ret, vector<MatrixXd>& coef, double tV)
 	//DenseBase<double>::Scalar t = 1;
 	double t = 1;
 	for (int i = 0; i < 4; i++) {
-		cout << coef[i] * t << endl;
+//		cout << coef[i] * t << endl;
 		M = M + coef[i] * t;
 		t *= tV;
 		ret.push_back(M);
@@ -38,8 +40,7 @@ static void MultiplyTV(vector<MatrixXd>& ret, vector<MatrixXd>& coef, double tV)
 Planner_mpc::Planner_mpc()
 {
 	// load path
-	int flag = road_ref.loadFile("config/road.csv");
-	if (!flag) throw "Failed to load reference path!";
+	if (!road_ref.loadFile("../config/road.csv")) throw "Failed to load reference path!";
 
 	// initialize
 	double vCar = 16.66667;
@@ -68,8 +69,8 @@ void Planner_mpc::initialize(double vCar)
 	/* read GAMMA */
 	MatrixXd gamma(NSTATE + NINPUT + NDIST, NSTATE + NINPUT + NDIST);
 	ifstream file;
-	file.open("config/planner_config.txt", ios::in);
-	cout << file.good() << endl;
+	file.open("../config/planner_config.txt", ios::in);
+	if (!file.good()) cout << "Failed to read GAMMA!" << endl;
 
 
 	int i = 0;
@@ -93,42 +94,41 @@ void Planner_mpc::initialize(double vCar)
 }
 
 
-void Planner_mpc::step(CAR_STATE * currentState, Path & planned_path, Environment& env)
+solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_path, Environment& env)
 {
 	unique_lock<mutex> plannedPathLock(planned_path.pathMutex);
 	while (!planned_path.isNeedReplan) {
 		planned_path.replanCv.wait(plannedPathLock);
 	}
-	
-	solver_int32_default exit_code;
 
 	double x = currentState->dPos[0], y = currentState->dPos[1];
 
-//	Waypoint refLocation = planned_path.cart2frenet(x, y, 0, planned_path.size());
-	Waypoint refLocation = road_ref.cart2frenet(x, y, 0, road_ref.size());
+	Waypoint roadLoc = road_ref.cart2frenet(x, y, 0, road_ref.size());
+	currentS = roadLoc.s;
+	Waypoint refLoc;
+	if (planned_path.size() > 0) {
+		interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, refLoc);
+	}
+	else {
+		refLoc = roadLoc;
+	}
 	plannedPathLock.unlock();
 
-	currentS = refLocation.s;
 	vector<double> s_predict;
 	for (int i = 0; i < NP; i++) {
 		s_predict.push_back(currentS + i * vel*Tp);
 	}
-	vector<double> dkappads;
-	Waypoint roadLocation;
-	interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, roadLocation);
 	interp<double, double>(road_ref.s, road_ref.dkappads, s_predict, dkappads);
 
 	VectorXd eq_c(NSTATE);
+	eq_c << -refLoc.offset, -refLoc.theta, -refLoc.kappa, -roadLoc.kappa;
 
 	env.envLock.lock();
 	vector<Obstacle> obstacles = env.obstacles;
 	env.envLock.unlock();
 	
 	for (int i = 0; i < NP; i++) {
-		if (i == 0) {
-			eq_c << -refLocation.offset, -refLocation.theta, -refLocation.kappa, -roadLocation.kappa;
-		}
-		else {
+		if (i > 0) {
 			eq_c = -D * vel*dkappads[i-1];
 		}
 		memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
@@ -159,21 +159,25 @@ void Planner_mpc::step(CAR_STATE * currentState, Path & planned_path, Environmen
 		memcpy(params.b + 32 * i, ineq_b.data(), 32 * sizeof(double));
 	}
 
-	//exit_code = myMPC_FORCESPro_solve(&params, &output, &info, fp);
+	solver_int32_default exit_code = myMPC_FORCESPro_solve(&params, &output, &info, fp);
 
-	//if (exit_code != OPTIMAL_myMPC_FORCESPro) {
-	//	isOutputOptimal = false;
-	//	cout << "The solver is not optimal!" << endl;
-	//}
+	return exit_code;
 }
 
 void Planner_mpc::threadStep(CAR_STATE * currentState, Path & planned_path, Environment& env)
 {
 	while (!terminate)
 	{
-		step(currentState, planned_path, env);
-		Output2Path(planned_path);
-		cout << "A new path is planned" << endl;
+		solver_int32_default exit_code = step(currentState, planned_path, env);
+		if (exit_code != OPTIMAL_myMPC_FORCESPro) {
+			isOutputOptimal = false;
+			cout << "Planner failed to get an optimal result!" << endl;
+		}
+		else
+		{
+			isOutputOptimal = true;
+			Output2Path(planned_path);
+		}
 	}
 
 	cout << "The planner is terminated!" << endl;
@@ -188,11 +192,12 @@ void Planner_mpc::Output2Path(Path & planned_path)
 	double x[NSTATE];
 	VectorXd x_vec(NSTATE);
 	planned_path.pathMutex.lock();
+	if (planned_path.size() > 0) planned_path.clear();
 	for (int i = 0; i < 10; i++) {
 		u = *p++;
 		memcpy(x, p, NSTATE * sizeof(double));
-		p += 4;
-		Map<VectorXd>(x, NSTATE) = x_vec;
+		p += NSTATE;
+		x_vec = Map<VectorXd>(x, NSTATE);
 		for (int j = 0; j < 4; j++) {
 			double d = x_vec(0);
 			double e_phi = x_vec(1);
@@ -201,15 +206,16 @@ void Planner_mpc::Output2Path(Path & planned_path)
 			pointForward.x = pointForward.x - d * sin(pointForward.theta);
 			pointForward.y = pointForward.y + d * cos(pointForward.theta);
 			pointForward.offset = d;
-			pointForward.theta = e_phi + pointForward.theta;
+			pointForward.theta = e_phi;
 
 			planned_path.push_back(pointForward, 0, sForward);
 			sForward += vel * Tc;
-			if (j < 3) x_vec = A_Tc * x_vec + B_Tc * u + D_Tc * 0; //ud
+			if (j < 3) x_vec = A_Tc * x_vec + B_Tc * u + D_Tc * dkappads[i]; 
 		}
 	}
 	planned_path.isNeedReplan = false;
 	planned_path.pathMutex.unlock();
+	cout << "A new path is planned" << endl;
 }
 
 vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obstacle, MatrixXd& T)
@@ -241,7 +247,7 @@ vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obs
 	//cout << "sInit= " << sInit << endl;
 	ds = (vel - obstacle.initState.vx) * ArrayXXd::Ones(1, n) - (dR * obstacle.Vertices).row(0).array();
 	ArrayXXd tKey = sInit / ds;
-	cout << "tKey= " << tKey << endl;
+	//cout << "tKey= " << tKey << endl;
 
 	double tLast = 0;
 	double tUb = Tp;

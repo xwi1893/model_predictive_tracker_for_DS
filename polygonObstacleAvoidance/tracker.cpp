@@ -13,7 +13,7 @@ Tracker_mpc::Tracker_mpc()
 	}
 	
 	// load path
-	int flag = road_ref.loadFile("road.csv");
+	int flag = road_ref.loadFile("../config/road.csv");
 	if (!flag) throw "Failed to load reference path!"; 
 
 	// initialize
@@ -27,18 +27,23 @@ Tracker_mpc::~Tracker_mpc()
 
 void Tracker_mpc::initialize()
 {
+	u_next[0] = 0;
 	vx = 16.66667;
-	memset(params.H, 0, sizeof(params.H));
-	vector<MpcTracker_float> H = { 10, 0, 0, 100, 1, 0.1 };
+	std::memset(params.H, 0, sizeof(params.H));
+	vector<MpcTracker_float> H = { 10000, 0, 0, 100, 4, 1 };
 	for (int i = 0; i < H.size(); i++) {
 		params.H[7 * i] = H[i];
 	}
 
+	const int rowH = NSTATE + 2 * NINPUT;
+	mat_H = Map<MatrixXd>(params.H, rowH, rowH);
+	cout << "mat_H = " << mat_H << endl;
+
 	// read AD
 	MatrixXd AD(NSTATE + NINPUT, NSTATE + 2 * NINPUT);
 	ifstream file;
-	file.open("config/config.txt", ios::in);
-//	cout << file.good() << endl;
+	file.open("../config/tracker_config.txt", ios::in);
+	if (!file.good()) cout << "Failed to read AD!" << endl;
 
 
 	int i = 0;
@@ -68,7 +73,7 @@ void Tracker_mpc::initialize()
 	//for (int i = 0; i < 5; i++) cout << *D_data++ << ',';
 }
 
-solver_int32_default Tracker_mpc::step(CAR_STATE * currentState)
+solver_int32_default Tracker_mpc::step(CAR_STATE * currentState, Path& planned_path)
 {
 	solver_int32_default exit_code;
 
@@ -80,11 +85,19 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState)
 	xInit << currentState->dBeta, currentState->yawRate, currentState->yawAngle - location.theta, location.offset, u_next[0];
 
 	double ref_kr, ref_ey;
-	Waypoint p_int;
+	Waypoint p_int, ref_point;
 	interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, p_int);
 
+	VectorXd ref = VectorXd::Zero(NSTATE + 2 * NINPUT);
+	planned_path.pathMutex.lock();
+	if (planned_path.size() == 0) {
+		planned_path.pathMutex.unlock(); 
+		return -1;
+	}
+	interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, ref_point);
+
 	for (int i = 0; i < NP; i++) {
-		ref_kr = p_int.kappa; ref_ey = p_int.offset;
+		ref_kr = p_int.kappa; ref_ey = ref_point.offset;
 		currentS = currentS + vx * Tc / (1 - ref_kr * ref_ey);
 		double ud = ref_kr * vx / (1 - ref_kr * ref_ey);
 
@@ -100,15 +113,13 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState)
 			memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
 		}
 		interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, p_int);
-		/*
-		double ref[NSTATE + NINPUT];
-		memset(ref, 0, sizeof(ref));
-		memcpy(params.Reference_Value + (NSTATE + NINPUT)*i, ref, sizeof(ref));
-		*/
-	}
+		interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, ref_point);
 
-	// reference always zero: tracking the lane
-	memset(params.Reference_Value, 0, sizeof(params.Reference_Value));
+		ref(3) = ref_point.theta; ref(4) = ref_point.offset;
+		ref = -mat_H * ref;
+		memcpy(params.Reference_Value + (NSTATE + 2*NINPUT)*i, ref.data(), sizeof(ref));
+	}
+	planned_path.pathMutex.unlock();
 
 	exit_code = MpcTracker_solve(&params, &output, &info, fp);
 	if (exit_code == OPTIMAL_MpcTracker) {
@@ -116,7 +127,7 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState)
 	}
 	else
 	{
-		cout << "The solver failed to get optimal solution!" << endl;
+		cout << "The tracker failed to get optimal solution!" << endl;
 		u_next[0] = 0;
 	}
 
@@ -131,6 +142,7 @@ double * Tracker_mpc::getOutput()
 void Tracker_mpc::threadStep(CAR_STATE * p_DS_to_C, float * p_C_to_DS, Path & planned_path)
 {
 	long frameCount = 0;
+	int trackerStep = 0;
 	int key = 0;
 	clock_t t_start;
 	while (!terminate)
@@ -140,13 +152,19 @@ void Tracker_mpc::threadStep(CAR_STATE * p_DS_to_C, float * p_C_to_DS, Path & pl
 		{
 			frameCount = cFrameCount;
 			t_start = clock();
-			solver_int32_default exit_code = step(p_DS_to_C);
+			solver_int32_default exit_code = step(p_DS_to_C, planned_path);
 			if (exit_code == OPTIMAL_MpcTracker) {
 				float next = (float)u_next[0] * RAD2DEG * Kt;
 				*p_C_to_DS = next;
+				cout << "The next steering angle is " << *p_C_to_DS << endl;
+			}
+			
+			if (++trackerStep >= 4) {
+				planned_path.isNeedReplan = true;
+				planned_path.replanCv.notify_all();
+				trackerStep = 0;
 			}
 			//tracker_timeCost.emplace_back((clock() - t_start)*1.0 / CLOCKS_PER_SEC * 1000);
-			//cout << "The next steering angle is " << *p_C_to_DS << endl;
 		}
 
 		if (_kbhit() != 0) key = _getch();
