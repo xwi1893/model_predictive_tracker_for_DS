@@ -105,19 +105,19 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState, Path& planned_p
 
 		if (i == 0) {
 			eq_c = -A * xInit - D * ud;
-			memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
+			memcpy(params.c + NSTATE * i, eq_c.data(), NSTATE*sizeof(double));
 		}
 		else
 		{
 			eq_c = -D * ud;
-			memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
+			memcpy(params.c + NSTATE * i, eq_c.data(), NSTATE*sizeof(double));
 		}
 		interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, p_int);
 		interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, ref_point);
 
 		ref(3) = ref_point.theta; ref(4) = ref_point.offset;
 		ref = -mat_H * ref;
-		memcpy(params.Reference_Value + (NSTATE + 2*NINPUT)*i, ref.data(), sizeof(ref));
+		memcpy(params.Reference_Value + (NSTATE + 2*NINPUT)*i, ref.data(), (NSTATE+2*NINPUT)*sizeof(double));
 	}
 	planned_path.pathMutex.unlock();
 
