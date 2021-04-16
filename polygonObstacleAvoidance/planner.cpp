@@ -228,7 +228,7 @@ vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obs
 
 	double px = obstacle.currentState.x; double py = obstacle.currentState.y;
 
-	Waypoint obstacle_sh = road_ref.cart2frenet(px, py, obstacle.currentState.theta, road_ref.size());
+	Waypoint obstacle_sh = road_ref.cart2frenet(px, py, 0, road_ref.size());
 	double theta_sh = obstacle_sh.theta;
 	MatrixXd R(2, 2);
 	R << cos(theta_sh), -sin(theta_sh), sin(theta_sh), cos(theta_sh);
