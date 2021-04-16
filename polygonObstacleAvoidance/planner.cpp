@@ -374,8 +374,8 @@ void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector
 		MultiplyTV(R_ap, coef_R, t_);
 		MultiplyTV(lambdaR_ap, coef_lambdaR, t_);
 		for (int k = 0; k < 4; k++) {
-			VectorXd sh = xyc_ap[i] + R_ap[i] * V1;
-			b_con.block<1, 1>(4 * i + k, 0) = sign * (b_con.block<1, 1>(4 * i + k, 0) + getH * TR*(sh + lambdaR_ap[i] * (V2 - V1)) + getH * Txy) + buffer*MatrixXd::Ones(1,1);
+			VectorXd sh = xyc_ap[k] + R_ap[k] * V1;
+			b_con.block<1, 1>(4 * i + k, 0) = sign * (b_con.block<1, 1>(4 * i + k, 0) + getH * TR*(sh + lambdaR_ap[k] * (V2 - V1)) + getH * Txy) + buffer*MatrixXd::Ones(1,1);
 		}
 	}
 }
