@@ -15,6 +15,8 @@ public:
 	~Simulator();
 
 	void update(float u);
+	
+	void dynamic_update(float u);
 
 	void addObstacle(const short hModeID, const char cDisp, const float posX, const float posY, 
 		const float yaw, const float speed, const float acc);
