@@ -8,6 +8,7 @@ Simulator::Simulator(const double xInit, const double yInit, const double speed,
 	state.fSpeed = speed;
 	state.yawAngle = yawAngle;
 	state.yawRate = yawRate;
+	state.dBeta = 0;
 	state.lTotalFrame = 0;
 	state.dtime = 0;
 }
@@ -25,6 +26,10 @@ void Simulator::update(float u)
 	state.yawAngle += state.yawRate * Tp;
 	state.dtime += Tp;
 	state.lTotalFrame++;
+}
+
+void Simulator::dynamic_update(float u)
+{
 }
 
 void Simulator::addObstacle(const short hModeID, const char cDisp, const float posX, const float posY, const float yaw, const float speed, const float acc)
