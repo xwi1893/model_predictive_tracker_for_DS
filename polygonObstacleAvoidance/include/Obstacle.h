@@ -127,7 +127,7 @@ public:
 		}
 	}
 	
-	Obstacle readObstacleFromIni(const char* fileName, const char* section) {
+	Obstacle readObstacleFromIni(const char* fileName, LPCSTR section) {
 		const int SIZE = 256;
 		char receiveStr[SIZE];
 		
@@ -166,8 +166,10 @@ public:
 		return obs;
 	}
 	
-	void readObstaclesFromIni(const char* fileName) {
-			
+	void readIni(vector<LPCSTR>& keyNames, const char* fileName) {
+		for (int i = 0; i<keyNames.size(); i++) {
+			obstacles.push_back(readObstacleFromIni(fileName, keyNames[i]);
+		}				    
 	}
 
 	void threadStep(CAR_STATE* state, Path& planned_path) {
