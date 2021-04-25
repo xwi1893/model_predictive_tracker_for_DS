@@ -4,6 +4,8 @@
 #include <condition_variable>
 #include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
+#include <sstream>
+#include <Windows.h>
 #include "NetCommIF_CarData.h"
 
 using namespace std;
@@ -123,6 +125,49 @@ public:
 			planned_path.isNeedReplan = true;
 			planned_path.replanCv.notify_all();
 		}
+	}
+	
+	Obstacle readObstacleFromIni(const char* fileName, const char* section) {
+		const int SIZE = 256;
+		char receiveStr[SIZE];
+		
+		GetPrivateProfileStringA(section, "id", "0", receiveStr, SIZE, fileName);
+		short id = strtol(receiveStr, NULL);
+		
+		vector<LPCSTR> keyNames = {"x", "y", "v", "a", "theta", "dtheta", "alpha", "dalpha", "tStart", "tEnd"};
+		vector<double> obstacleInfo;
+		for (int i = 0; i<keyNames.size(); i++) {
+			GetPrivateProfileStringA(section, keyNames[i], "0", receiveStr, SIZE, fileName);
+			obstacleInfo.push_back(strtod(receiveStr, NULL));
+		}
+		
+		double x, y, v, a, theta, dtheta, alpha, dalpha, tStart, tEnd;
+		x = obstacleInfo[0]; y = obstacleInfo[1]; v = obstacleInfo[2]; a = obstacle[3]; theta = obstacle[4]; 
+		dtheta = obstacleInfo[5]; alpha = obstacleInfo[6]; dalpha = obstacleInfo[7]; tStart =  obstacleInfo[8]; tEnd = obstacleInfo[9];
+		
+		GetPrivateProfileStringA(section, "avoidSide", "default", receiveStr, SIZE, fileName);
+		Side avoidSide = (strcmp(receiveStr, "left")==0)? LEFT:RIGHT;
+		
+		GetPrivateProfileStringA(section, "verticesNo", "default", receiveStr, SIZE, fileName);
+		const int verticesNo = strtol(receiveStr, NULL);
+
+		
+		GetPrivateProfileStringA(section, "vertices", "default", receiveStr, SIZE, fileName);
+		istringstream ss(string(receiveStr));
+		vector<double> vertices_vec;
+		while (ss) {
+			string str_data;
+			if (!getline(ss, str_data, ',')) break;
+			vertices_vec.push_back(stod(str_data));
+		}
+		Matrix<double, 2, verticesNo> Vertices(vertices_vec.data());
+		
+		Obstacle obs(id, x, y, v, a, theta, dtheta, alpha, dalpha, tStart, tEnd, Vertices, avoidSide);
+		return obs;
+	}
+	
+	void readObstaclesFromIni(const char* fileName) {
+			
 	}
 
 	void threadStep(CAR_STATE* state, Path& planned_path) {
