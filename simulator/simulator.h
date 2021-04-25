@@ -37,4 +37,7 @@ public:
 	CAR_STATE state;
 	double Tp;
 	const double L = 2.5;
+	
+private:
+	static P_vehicle Car;
 };
