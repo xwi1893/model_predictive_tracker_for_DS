@@ -7,6 +7,18 @@ constexpr double RAD2DEG = 180 / PI;
 constexpr double DEG2RAD = PI / 180;
 constexpr double Kt = 17;
 
+struct P_vehicle
+{
+	double MASS;
+	double IZ;
+	double LFAXIS;
+	double LRAXIS;
+	double CF;
+	double CR;
+	double LENGTH;
+	double WIDTH;
+};
+
 class Simulator
 {
 public:
