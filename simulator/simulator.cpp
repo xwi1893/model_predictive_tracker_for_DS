@@ -24,7 +24,7 @@ P_vehicle Simulator::Car{
 
 	//width
 	1.725
-}
+};
 
 Simulator::Simulator(const double xInit, const double yInit, const double speed, const double yawAngle, const double yawRate, const double t) :
 	Tp(t)
