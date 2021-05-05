@@ -6,6 +6,7 @@
 #include <time.h>
 #include <conio.h>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <thread>
 #include <mutex>
@@ -23,6 +24,8 @@
 using namespace std;
 using namespace Eigen;
 
+extern bool term;
+
 typedef pair<int, int> edgeNo;
 struct Edge {
 	double t1, t2;
@@ -31,6 +34,13 @@ struct Edge {
 
 	Edge(edgeNo& no, double t1, double t2, double s, double ds, double sEdge, double dsEdge) :
 		edge_no(no), t1(t1), t2(t2), s(s), ds(ds), sEdge(sEdge), dsEdge(dsEdge) {}
+};
+
+struct Planner_solveTime {
+	double stepTime;
+	double solverTime;
+
+	Planner_solveTime(const double stepT, const double solverT): stepTime(stepT), solverTime(solverT) {}
 };
 
 class Planner_mpc
@@ -43,19 +53,19 @@ public:
 	void initialize(double vCar);
 
 	/* model step function */
-	solver_int32_default step(CAR_STATE * currentState, Path & planned_path, Environment& env);
+	solver_int32_default step(CAR_STATE * currentState, Path & planned_path, Environment& env, vector<Planner_solveTime>& timeRecorder);
 
 	/* thread function of model step */
-	void threadStep(CAR_STATE * beginState, Path & planned_path, Environment& env);
+	void threadStep(CAR_STATE * beginState, Path & planned_path, Environment& env, vector<Path>& recorder, vector<Planner_solveTime>& timeRecorder);
 
 	/* transform output to path*/
-	void Output2Path(Path & planned_path);
+	void Output2Path(Path & planned_path, vector<Path>& recorder);
 
 	/* create separation */
-	vector<Edge> createSeparation(double s, MatrixXd& dR, Obstacle& obstacle, MatrixXd& T);
+	void createSeparation(double s, MatrixXd& dR, Obstacle& obstacle, vector<Edge>& edges, double t);
 
 	/* over approximation of constraints */
-	void overApprox(double s2cg, double tk, Obstacle& obstacle, vector<Edge>& edges, double dist, MatrixXd& T, MatrixXd& G_con, MatrixXd& b_con);
+	void overApprox(double s2cg, double tk, Obstacle& obstacle, vector<Edge>& edges, double dist, MatrixXd& G_con, MatrixXd& b_con);
 
 public:
 	Path road_ref, ref_path;
@@ -75,9 +85,8 @@ private:
 	static const int cols;
 
 	double vel;
-	double sOffset[3];
+	const double sOffset[3] = { -2.2916666667, -0.825, 0.6416666667 };
 
-	bool terminate = false;
 	bool isOutputOptimal = true;
 	double currentS;
 	vector<double> dkappads;

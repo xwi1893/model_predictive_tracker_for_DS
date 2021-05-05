@@ -1,15 +1,19 @@
 #pragma once
 #include <vector>
+#include <string>
+#include <iostream>
+#include <sstream>
 #include <mutex>
 #include <condition_variable>
 #include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
-#include <sstream>
 #include <Windows.h>
+#include "Path.h"
 #include "NetCommIF_CarData.h"
 
 using namespace std;
 
+typedef Eigen::Matrix<double, 2, Dynamic> MatrixVerd;
 
 struct State {
 	double x; 
@@ -27,19 +31,30 @@ enum Side
 	RIGHT
 };
 
+struct ObsRecord
+{
+	double time;
+	Waypoint p;
+	MatrixXd TR;
+	MatrixXd Txy;
+
+	ObsRecord(const double t, Waypoint& waypoint, MatrixXd& tr, MatrixXd& txy): time(t), p(waypoint), TR(tr), Txy(txy) {}
+};
+
 class Obstacle {
 public:
 	short ID;
 	State initState;
 	State currentState;
 	double tStart, tEnd;
-	Eigen::MatrixXd Vertices;
+	MatrixXd Vertices;
 	Side avoidSide = LEFT;
+	vector<ObsRecord> record;
 
 public:
 	Obstacle() {}
 	Obstacle(short id, double x, double y, double v, double a, double theta, double dtheta,
-		double alpha, double dalpha, double tStart, double tEnd, Eigen::MatrixXd& Vobs, Side side) :
+		double alpha, double dalpha, double tStart, double tEnd, MatrixXd& Vobs, Side side) :
 		ID(id), tStart(tStart), tEnd(tEnd), Vertices(Vobs), avoidSide(side) {
 		initState = { x, y, v, v*cos(theta), v*sin(theta), a, theta, dtheta, alpha, dalpha, 0 };
 		currentState = initState;
@@ -77,13 +92,11 @@ public:
 		}			
 	}
 
-	void curVertices(Eigen::MatrixXd& V, Eigen::MatrixXd& V_rel) {
+	void curVertices(Eigen::MatrixXd& V_rel) {
 		double alpha = currentState.alpha;
 		Eigen::Matrix2d R;
 		R << cos(alpha), -sin(alpha), sin(alpha), cos(alpha);
-		size_t n = Vertices.cols();
 		V_rel = R * Vertices;
-		V = V_rel + (Eigen::MatrixXd(2, 1) << currentState.x, currentState.y).finished().replicate(1, n);
 	}
 
 	~Obstacle() {}
@@ -92,32 +105,37 @@ public:
 class Environment {
 public:
 	vector<Obstacle> obstacles;
+	vector<Obstacle*> dispObstacles;
 	mutex envLock;
+	bool hasObstaclesRead = false;
 
 	Environment() {}
 	~Environment() {}
 
-	void updateObstacles(CAR_STATE* state, Path& planned_path) {
+	void updateObstacles(const CAR_STATE* state, Path& planned_path) {
+		assert(hasObstaclesRead == true);
 		bool isNeedReplan = false;
-		for (int i = 0; i < 5; i++) {
-			ST_MODEL_DATA& model = state->stModel[i];
+		for (int i = 0; i < 10; i++) {
+			const ST_MODEL_DATA& model = state->stModel[i];
 			if (model.hModeID == -1) continue;
 			bool isInObstacles = false;
-			for (auto it = obstacles.begin(); it != obstacles.end(); it++) {
-				if (it->ID == model.hModeID) {
+			for (auto it = dispObstacles.begin(); it != dispObstacles.end(); it++) {
+				if ((*it)->ID == model.hModeID) {
 					isInObstacles = true;
-					if (!model.cDisp) obstacles.erase(it);
+					if (!model.cDisp) dispObstacles.erase(it);
 					break;
 				}
 			}
 
 			if (!isInObstacles && model.cDisp) {
-				MatrixXd Vobs(2, 4);
-				Vobs << 3.724, 3.724, -1.101, -1.101, -0.917, 0.917, 0.917, -0.917;
-				double tEnd = (model.fAccel > -0.01) ? state->dtime + 10 : state->dtime - model.fSpeed / model.fAccel;
-				Obstacle obs(model.hModeID, model.fPosX, model.fPosY, model.fSpeed, model.fAccel, model.fIsoYaw,
-					0, PI / 4, 0, state->dtime, tEnd, Vobs, RIGHT);
-				obstacles.push_back(obs);
+				for (Obstacle& obs : obstacles) {
+					if (model.hModeID == obs.ID) {
+						obs.tStart = state->dtime;
+						obs.tEnd = (model.fAccel > -0.01) ? state->dtime + 10 : state->dtime - model.fSpeed / model.fAccel;
+						dispObstacles.push_back(&obs);
+						break;
+					}
+				}
 				isNeedReplan = true;
 			}
 		}
@@ -126,56 +144,70 @@ public:
 			planned_path.replanCv.notify_all();
 		}
 	}
-	
+
 	Obstacle readObstacleFromIni(const char* fileName, LPCSTR section) {
-		const int SIZE = 256;
+		const int SIZE = 512;
 		char receiveStr[SIZE];
-		
+
 		GetPrivateProfileStringA(section, "id", "0", receiveStr, SIZE, fileName);
-		short id = strtol(receiveStr, NULL);
-		
-		vector<LPCSTR> keyNames = {"x", "y", "v", "a", "theta", "dtheta", "alpha", "dalpha", "tStart", "tEnd"};
+		short id = (short)strtol(receiveStr, NULL, 0);
+
+		vector<LPCSTR> keyNames = { "x", "y", "v", "a", "theta", "dtheta", "alpha", "dalpha", "tStart", "tEnd" };
 		vector<double> obstacleInfo;
-		for (int i = 0; i<keyNames.size(); i++) {
+		for (int i = 0; i < keyNames.size(); i++) {
 			GetPrivateProfileStringA(section, keyNames[i], "0", receiveStr, SIZE, fileName);
 			obstacleInfo.push_back(strtod(receiveStr, NULL));
 		}
-		
-		double x, y, v, a, theta, dtheta, alpha, dalpha, tStart, tEnd;
-		x = obstacleInfo[0]; y = obstacleInfo[1]; v = obstacleInfo[2]; a = obstacle[3]; theta = obstacle[4]; 
-		dtheta = obstacleInfo[5]; alpha = obstacleInfo[6]; dalpha = obstacleInfo[7]; tStart =  obstacleInfo[8]; tEnd = obstacleInfo[9];
-		
-		GetPrivateProfileStringA(section, "avoidSide", "default", receiveStr, SIZE, fileName);
-		Side avoidSide = (strcmp(receiveStr, "left")==0)? LEFT:RIGHT;
-		
-		GetPrivateProfileStringA(section, "verticesNo", "default", receiveStr, SIZE, fileName);
-		const int verticesNo = strtol(receiveStr, NULL);
 
-		
+		double x, y, v, a, theta, dtheta, alpha, dalpha, tStart, tEnd;
+		x = obstacleInfo[0]; y = obstacleInfo[1]; v = obstacleInfo[2]; a = obstacleInfo[3]; theta = obstacleInfo[4];
+		dtheta = obstacleInfo[5]; alpha = obstacleInfo[6]; dalpha = obstacleInfo[7]; tStart = obstacleInfo[8]; tEnd = obstacleInfo[9];
+
+		GetPrivateProfileStringA(section, "avoidSide", "default", receiveStr, SIZE, fileName);
+		Side avoidSide = (strcmp(receiveStr, "left") == 0) ? LEFT : RIGHT;
+
+
 		GetPrivateProfileStringA(section, "vertices", "default", receiveStr, SIZE, fileName);
-		istringstream ss(string(receiveStr));
+		string line(receiveStr);
+		istringstream ss(line);
 		vector<double> vertices_vec;
 		while (ss) {
 			string str_data;
 			if (!getline(ss, str_data, ',')) break;
 			vertices_vec.push_back(stod(str_data));
 		}
-		Matrix<double, 2, verticesNo> Vertices(vertices_vec.data());
-		
+		const int verticesCols = vertices_vec.size() / 2;
+		Map<Matrix<double, 2, Dynamic, RowMajor>> vertices2Map(vertices_vec.data(), 2, verticesCols);
+		MatrixXd Vertices(vertices2Map);
+
 		Obstacle obs(id, x, y, v, a, theta, dtheta, alpha, dalpha, tStart, tEnd, Vertices, avoidSide);
 		return obs;
 	}
-	
-	void readIni(vector<LPCSTR>& keyNames, const char* fileName) {
-		for (int i = 0; i<keyNames.size(); i++) {
-			obstacles.push_back(readObstacleFromIni(fileName, keyNames[i]);
-		}				    
+
+	void readIni(vector<LPCSTR>& keyNames, const char* fileName, Path& road_ref) {
+		const double Tp = 0.1;
+		for (int i = 0; i < keyNames.size(); i++) {
+			Obstacle obs = readObstacleFromIni(fileName, keyNames[i]);
+			double tEnd = obs.initState.acc > -0.01 ? 10 : -obs.initState.v / obs.initState.acc;
+			obs.tEnd = tEnd;
+			double tStart = 0;
+			while (tStart <= tEnd) {
+				obs.motion(tStart);
+				Waypoint obs_sh = road_ref.cart2frenet(obs.currentState.x, obs.currentState.y, 0, road_ref.size());
+				double theta_sh = obs_sh.theta;
+				MatrixXd TR = (MatrixXd(2, 2) << cos(theta_sh), -sin(theta_sh), sin(theta_sh), cos(theta_sh)).finished();
+				MatrixXd Txy = (MatrixXd(2, 1) << obs_sh.s, obs_sh.offset).finished();
+				obs.record.emplace_back(tStart, obs_sh, TR, Txy);
+				tStart += Tp;
+			}
+			obstacles.push_back(obs);
+		}
+		hasObstaclesRead = true;
 	}
 
 	void threadStep(CAR_STATE* state, Path& planned_path) {
 		long frameCount = 0;
-		bool terminate = false;
-		while (!terminate) {
+		while (!term) {
 			long cFrameCount = state->lTotalFrame;
 			if (cFrameCount > frameCount) {
 				frameCount = cFrameCount;

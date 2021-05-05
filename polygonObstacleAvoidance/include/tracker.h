@@ -21,6 +21,8 @@ constexpr double PI = 3.1415926;
 constexpr auto DEG2RAD = PI / 180;
 constexpr auto RAD2DEG = 180 / PI;
 
+extern bool term;
+
 class Tracker_mpc
 {
 public:
@@ -43,8 +45,6 @@ public:
 	Path ref_path;
 	Path road_ref;
 
-	bool terminate = false;
-
 private:
 	static constexpr auto Tc = 0.025;
 	static constexpr auto NP = 30;
@@ -55,7 +55,7 @@ private:
 	double u_next[1];
 	double vx;
 
-	MatrixXd A, D, mat_H;
+	MatrixXd A, D;
 
 	MpcTracker_params params;
 	MpcTracker_info info;

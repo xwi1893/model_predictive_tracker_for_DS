@@ -16,6 +16,14 @@ public:
 		 coef.push_back((MatrixXd::Zero(2, 1)));
 	 }
 
+	 static void Cxy_dtheta(const double x, const double y, const double v, const double a,
+		 const double theta, const double dtheta, vector<MatrixXd>& coef) {
+		 coef.push_back((MatrixXd(2, 1) << x, y).finished());
+		 coef.push_back((MatrixXd(2, 1) << v * cos(theta), v*sin(theta)).finished());
+		 coef.push_back((MatrixXd(2, 1) << a * cos(theta) / 2.0 - dtheta * v*sin(theta) / 2.0, a*sin(theta) / 2.0 + dtheta * v*cos(theta) / 2.0).finished());
+		 coef.push_back((MatrixXd(2, 1) << -a*dtheta*sin(theta)/3 - dtheta*dtheta*v*cos(theta)/6, -dtheta*dtheta*v*sin(theta)/6 + a*dtheta*cos(theta)/3).finished());
+	 }
+
 	 static void CR(double alpha, double dalpha, vector<MatrixXd>& coef) {
 		 coef.push_back((MatrixXd(2, 2) << cos(alpha), -sin(alpha), sin(alpha), cos(alpha)).finished());
 		 coef.push_back((MatrixXd(2, 2) << -dalpha * sin(alpha), -dalpha * cos(alpha),
