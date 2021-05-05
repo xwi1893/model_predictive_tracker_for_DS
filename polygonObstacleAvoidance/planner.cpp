@@ -2,6 +2,11 @@
 
 //using namespace std;
 
+template <typename T> 
+inline int sgn(T val) {
+	return (T(0) < val) - (val < T(0));
+}
+
 static MatrixXd dR(double alpha0, double dalpha, double t) {
 	MatrixXd M(2, 2);
 	M << -dalpha * sin(alpha0 + dalpha * t), -dalpha * cos(alpha0 + dalpha * t),
@@ -10,8 +15,8 @@ static MatrixXd dR(double alpha0, double dalpha, double t) {
 }
 
 static void MultiplyTV(MatrixXd& ret, vector<MatrixXd>& coef, double tV) {
-	static const int r = coef[0].rows();
-	static const int c = coef[0].cols();
+	Eigen::Index r = coef[0].rows();
+	Eigen::Index c = coef[0].cols();
 	ret = MatrixXd::Zero(r, c);
 	if (coef.size() != 4) throw "The size of params to MultiplyTV is wrong!";
 
@@ -23,14 +28,13 @@ static void MultiplyTV(MatrixXd& ret, vector<MatrixXd>& coef, double tV) {
 }
 
 static void MultiplyTV(vector<MatrixXd>& ret, vector<MatrixXd>& coef, double tV) {
-	const int r = coef[0].rows();
-	const int c = coef[0].cols();
+	Index r = coef[0].rows();
+	Index c = coef[0].cols();
 	MatrixXd M = MatrixXd::Zero(r, c);
 	if (coef.size() != 4) throw "The size of params to MultiplyTV is wrong!";
-	//DenseBase<double>::Scalar t = 1;
+
 	double t = 1;
 	for (int i = 0; i < 4; i++) {
-//		cout << coef[i] * t << endl;
 		M = M + coef[i] * t;
 		t *= tV;
 		ret.push_back(M);
@@ -54,8 +58,9 @@ Planner_mpc::~Planner_mpc()
 void Planner_mpc::initialize(double vCar)
 {
 	vel = vCar;
-	sOffset[0] = -2.2916666667; sOffset[1] = -0.825; sOffset[2] = 0.6416666667;
 
+	//double D_array[4] = { -0.046296296296296*vel, -0.083333333333333*vel, 0, 0.1*vel};
+	//memcpy(D, D_array, 4 * sizeof(double));
 	this->D = (VectorXd(NSTATE) << -0.046296296296296, -0.083333333333333, 0, 0.1).finished();
 
 	A_Tc = (MatrixXd(NSTATE, NSTATE) << 1.0, 0.416666666666667, 0.086805555555556, -0.086805555555556,
@@ -65,6 +70,13 @@ void Planner_mpc::initialize(double vCar)
 	B_Tc = (MatrixXd(NSTATE, NINPUT) << 0.000723379629630, 0.005208333333333, 0.025, 0).finished();
 	D_Tc = (MatrixXd(NSTATE, NDIST) << -0.000723379629630, -0.005208333333333, 0, 0.025).finished();
 
+	/* set param.H */
+	double H_N[36] = { 0.1, 0, 0, 0, 0, 0,
+					   0, 1000, 0, 0, 0, 0,
+					   0, 0, 500, 0, 0, 0,
+					   0, 0, 0, 1e2, -1e2, 0,
+					   0, 0, 0, -1e2, 1e2, 1e8 };
+	memcpy(params.H_N, H_N, sizeof(double) * 36);
 
 	/* read GAMMA */
 	MatrixXd gamma(NSTATE + NINPUT + NDIST, NSTATE + NINPUT + NDIST);
@@ -94,17 +106,19 @@ void Planner_mpc::initialize(double vCar)
 }
 
 
-solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_path, Environment& env)
+solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_path, Environment& env, vector<Planner_solveTime>& timeRecorder)
 {
 	unique_lock<mutex> plannedPathLock(planned_path.pathMutex);
 	while (!planned_path.isNeedReplan) {
 		planned_path.replanCv.wait(plannedPathLock);
 	}
 
-	double x = currentState->dPos[0], y = currentState->dPos[1];
+	clock_t startTime = clock();
+	double x = currentState->dPos[0], y = currentState->dPos[1], currentTime = currentState->dtime;
 
 	Waypoint roadLoc = road_ref.cart2frenet(x, y, 0, road_ref.size());
-	currentS = roadLoc.s;
+	//currentS = roadLoc.s;
+	currentS = roadLoc.s + vel * Tp;
 	Waypoint refLoc;
 	if (planned_path.size() > 0) {
 		interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, refLoc);
@@ -114,9 +128,9 @@ solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_
 	}
 	plannedPathLock.unlock();
 
-	vector<double> s_predict;
+	vector<double> s_predict(NP, 0);      
 	for (int i = 0; i < NP; i++) {
-		s_predict.push_back(currentS + i * vel*Tp);
+		s_predict[i] = currentS + i * vel*Tp;
 	}
 	interp<double, double>(road_ref.s, road_ref.dkappads, s_predict, dkappads);
 
@@ -124,7 +138,7 @@ solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_
 	eq_c << -refLoc.offset, -refLoc.theta, -refLoc.kappa, -roadLoc.kappa;
 
 	env.envLock.lock();
-	vector<Obstacle> obstacles = env.obstacles;
+	vector<Obstacle*> obstacles = env.dispObstacles;
 	env.envLock.unlock();
 	
 	for (int i = 0; i < NP; i++) {
@@ -133,42 +147,45 @@ solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_
 		}
 		memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
 
-		double ti = currentState->dtime + i * Tp;
-		MatrixXd ineq_A = MatrixXd::Zero(32, 5);
+		double ti = currentTime + (i + 1)*Tp;
+		MatrixXd ineq_A = MatrixXd::Zero(32, 6);
 		VectorXd ineq_b = VectorXd::Zero(32);
 
-		int ineqStartRow = 0;
+		Eigen::Index ineqStartRow = 0;
 
 		for (int j = 0; j < obstacles.size(); j++) {
-			obstacles[j].motion(ti);
-			MatrixXd dR_ij = dR(obstacles[j].initState.alpha, obstacles[j].initState.dalpha, ti - obstacles[j].tStart);
+			obstacles[j]->motion(ti);
+			MatrixXd dR_ij = dR(obstacles[j]->initState.alpha, obstacles[j]->initState.dalpha, ti - obstacles[j]->tStart);
 			for (int k = 0; k < 3; k++) {
-				MatrixXd T;
-				vector<Edge> edges = createSeparation(s_predict[i] + sOffset[k], dR_ij, obstacles[j], T);
+				vector<Edge> edges;
+				createSeparation(s_predict[i] + sOffset[k], dR_ij, *obstacles[j], edges, ti);
 				if (!edges.empty()) {
 					MatrixXd Gk, bk;
-					overApprox(sOffset[k], ti, obstacles[j], edges, dkappads[i], T, Gk, bk);
-					ineq_A.block(ineqStartRow, 0, Gk.rows(), 5) = Gk;
+					overApprox(sOffset[k], ti, *obstacles[j], edges, vel*dkappads[i], Gk, bk);  // vel * dkappads[i] !
+					ineq_A.block(ineqStartRow, 0, Gk.rows(), 6) = Gk;
 					ineq_b.block(ineqStartRow, 0, bk.rows(), 1) = bk;
 					ineqStartRow += Gk.rows();
 				}
 			}
 		}
 
-		memcpy(params.A + 160 * i, ineq_A.data(), 160*sizeof(double));
+		memcpy(params.A + 192 * i, ineq_A.data(), 192 * sizeof(double));
 		memcpy(params.b + 32 * i, ineq_b.data(), 32 * sizeof(double));
 	}
 
 	solver_int32_default exit_code = myMPC_FORCESPro_solve(&params, &output, &info, fp);
 
+	double stepT = (clock() - startTime) * 1.0 / CLOCKS_PER_SEC;
+	timeRecorder.emplace_back(stepT, info.solvetime);
+
 	return exit_code;
 }
 
-void Planner_mpc::threadStep(CAR_STATE * currentState, Path & planned_path, Environment& env)
+void Planner_mpc::threadStep(CAR_STATE * currentState, Path & planned_path, Environment& env, vector<Path>& recorder, vector<Planner_solveTime>& timeRecorder)
 {
-	while (!terminate)
+	while (!term)
 	{
-		solver_int32_default exit_code = step(currentState, planned_path, env);
+		solver_int32_default exit_code = step(currentState, planned_path, env, timeRecorder);
 		if (exit_code != OPTIMAL_myMPC_FORCESPro) {
 			isOutputOptimal = false;
 			cout << "Planner failed to get an optimal result!" << endl;
@@ -176,27 +193,44 @@ void Planner_mpc::threadStep(CAR_STATE * currentState, Path & planned_path, Envi
 		else
 		{
 			isOutputOptimal = true;
-			Output2Path(planned_path);
+			Output2Path(planned_path, recorder);
 		}
 	}
 
 	cout << "The planner is terminated!" << endl;
 }
 
-void Planner_mpc::Output2Path(Path & planned_path)
+void Planner_mpc::Output2Path(Path & planned_path, vector<Path>& recorder)
 {
 	if (!isOutputOptimal) return;
 	myMPC_FORCESPro_float* p = (myMPC_FORCESPro_float*)&output;
 	double sForward = currentS;
+	double sPast = currentS - vel * Tp;
 	double u;
 	double x[NSTATE];
 	VectorXd x_vec(NSTATE);
 	planned_path.pathMutex.lock();
-	if (planned_path.size() > 0) planned_path.clear();
+	if (planned_path.size() > 0) {
+		int i = 0;
+		while (i < planned_path.size()) {
+			if (planned_path.waypoints[i].s < sPast) {
+				planned_path.waypoints.erase(planned_path.waypoints.begin() + i);
+				planned_path.dkappads.erase(planned_path.dkappads.begin() + i);
+				planned_path.s.erase(planned_path.s.begin() + i);
+			}
+			else if (planned_path.waypoints[i].s >= currentS) {
+				planned_path.waypoints.erase(planned_path.waypoints.begin() + i, planned_path.waypoints.end());
+				planned_path.dkappads.erase(planned_path.dkappads.begin() + i, planned_path.dkappads.end());
+				planned_path.s.erase(planned_path.s.begin() + i, planned_path.s.end());
+				break;
+			}
+			else i++;
+		}
+	}
 	for (int i = 0; i < 10; i++) {
 		u = *p++;
 		memcpy(x, p, NSTATE * sizeof(double));
-		p += NSTATE;
+		p += NSTATE+1;
 		x_vec = Map<VectorXd>(x, NSTATE);
 		for (int j = 0; j < 4; j++) {
 			double d = x_vec(0);
@@ -207,46 +241,47 @@ void Planner_mpc::Output2Path(Path & planned_path)
 			pointForward.y = pointForward.y + d * cos(pointForward.theta);
 			pointForward.offset = d;
 			pointForward.theta = e_phi;
+			pointForward.kappa = x_vec(2);
 
 			planned_path.push_back(pointForward, 0, sForward);
 			sForward += vel * Tc;
-			if (j < 3) x_vec = A_Tc * x_vec + B_Tc * u + D_Tc * dkappads[i]; 
+			if (j < 3) x_vec = A_Tc * x_vec + B_Tc * u + D_Tc * vel * dkappads[i]; 
 		}
 	}
 	planned_path.isNeedReplan = false;
+	recorder.push_back(planned_path);
 	planned_path.pathMutex.unlock();
 	cout << "A new path is planned" << endl;
 }
 
-vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obstacle, MatrixXd& T)
+void Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obstacle, vector<Edge>& edges, double t)
 {
 	int sgn_direction = (obstacle.avoidSide == LEFT) ? 1 : -1;
-	MatrixXd V, Vobsr;
-	obstacle.curVertices(V, Vobsr);
-	double dalpha = obstacle.initState.dalpha;
-	int n = obstacle.Vertices.cols();
+	MatrixXd Vobsr;
+	obstacle.curVertices(Vobsr);
+	//cout << "Vobsr = " << endl << Vobsr << endl;
+	const int n = (int)obstacle.Vertices.cols();
 
-	double px = obstacle.currentState.x; double py = obstacle.currentState.y;
+	size_t index = floor((t - obstacle.tStart) / Tp);
+	if (index >= obstacle.record.size()) index = obstacle.record.size() - 1;
+	ObsRecord& rec = obstacle.record[index];
+	MatrixXd TR = rec.TR;
+	MatrixXd Txy = rec.Txy;
 
-	Waypoint obstacle_sh = road_ref.cart2frenet(px, py, 0, road_ref.size());
-	double theta_sh = obstacle_sh.theta;
-	MatrixXd R(2, 2);
-	R << cos(theta_sh), -sin(theta_sh), sin(theta_sh), cos(theta_sh);
-	MatrixXd Txy = (MatrixXd(2, 1) << obstacle_sh.s, obstacle_sh.offset).finished() - R * (MatrixXd(2, 1) << px, py).finished();
-	T = (MatrixXd(3, 3) << cos(theta_sh), -sin(theta_sh), Txy(0,0),
-		sin(theta_sh), cos(theta_sh), Txy(1,0),
-		0, 0, 1).finished();
 
-	ArrayXXd sInit, ds;
-	MatrixXd V_sh(V.rows() + 1, V.cols());
-	V_sh << V, MatrixXd::Ones(1, V.cols());
-	V_sh = T * V_sh;
-	sInit = V_sh.row(0).array() - s * ArrayXXd::Ones(1, n);
-	//cout << "s = " << s << endl;
-	//cout << "V= " << V_sh.row(0).array() << endl;
+	MatrixXd V_sh = TR * Vobsr + Txy * MatrixXd::Ones(1, n);
+	MatrixXd dV_sh = TR * dR*obstacle.Vertices;
+
+	double* sInit = new double[n];
+	double* ds = new double[n];
+	double* tKey = new double[n];
+	for (int i = 0; i < n; i++) {
+		sInit[i] = V_sh(0, i) - s;
+		ds[i] = vel - obstacle.currentState.v*cos(obstacle.currentState.theta - rec.p.theta) - dV_sh(0, i);
+		tKey[i] = sInit[i] / ds[i];
+	}
+
 	//cout << "sInit= " << sInit << endl;
-	ds = (vel - obstacle.initState.vx) * ArrayXXd::Ones(1, n) - (dR * obstacle.Vertices).row(0).array();
-	ArrayXXd tKey = sInit / ds;
 	//cout << "tKey= " << tKey << endl;
 
 	double tLast = 0;
@@ -255,28 +290,31 @@ vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obs
 	int tKeyMinIndex;
 	vector<edgeNo> firstEdge;
 	edgeNo currentEdge;
-	vector<Edge> edges;
 
 	for (int k = 0; k < n; k++) {
 		int kn = (k + 1) % n;
-		if (sInit(k)*sInit(kn) < 0) {
+		if ((sInit[k]<0 && sInit[kn]>0) || (sInit[k]>0 && sInit[kn]<0))
+		{
 			firstEdge.emplace_back(k, kn);
 		}
-		if (tKey(k) >= tLast && tKey(k) < tKeyMin && tKey(k) <= Tp) {
-			tKeyMin = tKey(k);
+		double tKey_k = tKey[k];
+		if (tKey_k >= tLast && tKey_k < tKeyMin && tKey_k <= Tp) {
+			tKeyMin = tKey_k;
 			tKeyMinIndex = k;
 		}
-
 	}
-	if (firstEdge.empty() && tKeyMin<=Tp) {
-		firstEdge.emplace_back( tKeyMinIndex, (tKeyMinIndex + 1) % n );
-		firstEdge.emplace_back( tKeyMinIndex, (tKeyMinIndex + n - 1) % n );
+	if (firstEdge.empty()) {
+		if (tKeyMin <= Tp) {
+			tLast = tKeyMin;
+			firstEdge.emplace_back(tKeyMinIndex, (tKeyMinIndex + 1) % n);
+			firstEdge.emplace_back(tKeyMinIndex, (tKeyMinIndex + n - 1) % n);
+		}
+		else return;
 	}
-	else return edges;
 
 
-	double y1_mid = Vobsr(1, firstEdge[0].first) + Vobsr(1, firstEdge[0].second);
-	double y2_mid = Vobsr(1, firstEdge[1].first) + Vobsr(1, firstEdge[1].second);
+	double y1_mid = V_sh(1, firstEdge[0].first) + V_sh(1, firstEdge[0].second);
+	double y2_mid = V_sh(1, firstEdge[1].first) + V_sh(1, firstEdge[1].second);
 	if ((y2_mid - y1_mid)*sgn_direction > 0) {
 		currentEdge = firstEdge[1];
 	}
@@ -289,56 +327,62 @@ vector<Edge> Planner_mpc::createSeparation(double s, MatrixXd& dR, Obstacle& obs
 
 	while (tLast < Tp) {
 		tUb = Tp;
-		double se = sInit(currentEdge.second) - sInit(currentEdge.first);
-		double dse = ds(currentEdge.second) - ds(currentEdge.first);
+		double se = sInit[currentEdge.second] - sInit[currentEdge.first];
+		double dse = ds[currentEdge.second] - ds[currentEdge.first];
 		int k = -1;
 		int k_adj = -1;
-		if (tKey(currentEdge.first) > tLast && tKey(currentEdge.first) <= tUb) {
-			tUb = tKey(currentEdge.first);
+		if (tKey[currentEdge.first] > tLast && tKey[currentEdge.first] <= tUb) {
+			tUb = tKey[currentEdge.first];
 			k = currentEdge.first; k_adj = currentEdge.second;
 		}
-		if (tKey(currentEdge.second) > tLast && tKey(currentEdge.second) <= tUb) {
-			tUb = tKey(currentEdge.second);
+		if (tKey[currentEdge.second] > tLast && tKey[currentEdge.second] <= tUb) {
+			tUb = tKey[currentEdge.second];
 			k = currentEdge.second; k_adj = currentEdge.first;
 		}
-		edges.emplace_back(currentEdge, tLast, tUb, -sInit(currentEdge.first), ds(currentEdge.first), se, dse);
+		edges.emplace_back(currentEdge, tLast, tUb, -sInit[currentEdge.first], ds[currentEdge.first], se, dse);
 
 		if (k != -1) {
-			currentEdge.first = k;
-			currentEdge.second = (2 * k + n - k_adj) % n;
+			int knext = (2 * k + n - k_adj) % n;
+			if (tKey[knext] > tUb) {
+				currentEdge.first = k;
+				currentEdge.second = knext;
+			}
+			else break;
 		}
 		tLast = tUb;
 	}
-
-	return edges;
+	delete[] sInit;
+	delete[] ds;
+	delete[] tKey;
 }
 
-void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector<Edge>& edges, double dist, MatrixXd & T, 
+void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector<Edge>& edges, double dist,
 	MatrixXd& G_con, MatrixXd& b_con)
 {
-	//MatrixXd G(1, 4);
-	//G << 1, s2cg, 0, 0;
 	MatrixXd G(1, 2);
 	G << 1, s2cg;
-
 
 	int sign = obstacle.avoidSide == LEFT ? -1 : 1;
 
 	double buffer = 0.1;
-	int n = edges.size();
+	size_t n = edges.size();
 	double acc = obstacle.initState.acc; 
 	double dtheta = obstacle.initState.dtheta; 
 	double dalpha = obstacle.initState.dalpha;
 	double x, y, v, theta, alpha;
 
+	size_t index = floor((tk - obstacle.tStart) / Tp);
+	if (index >= obstacle.record.size()) index = obstacle.record.size() - 1;
+	ObsRecord& rec = obstacle.record[index];
+	MatrixXd TR = rec.TR;
+	MatrixXd Txy = rec.Txy;
+
+	Txy = Txy - TR * (MatrixXd(2, 1) << obstacle.currentState.x, obstacle.currentState.y).finished();
+	
 	MatrixXd getH(1, 2); getH << 0, 1;
-	MatrixXd TR = T.block<2, 2>(0, 0);
-	MatrixXd Txy = T.block<2, 1>(0, 2);
+	G_con = MatrixXd::Zero(4 * n, 6);	b_con = MatrixXd::Zero(4 * n, 1);
 
-	G_con = MatrixXd::Zero(4 * n, 5);
-	b_con = MatrixXd::Zero(4 * n, 1);
-
-	for (int i = 0; i < n; i++)
+	for (size_t i = 0; i < n; i++)
 	{
 		Edge& edge = edges[i];
 		double t1 = edge.t1;
@@ -351,8 +395,11 @@ void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector
 		for (int k = 0; k < 4; k++) {
 			MatrixXd GAMMA_k = Gamma_vec[k]*Gamma_tmp;
 			G_con.block<1, 5>(4 * i + k, 0) = sign * G * GAMMA_k.block<2, 5>(2, 1);
+			G_con(4 * i + k, 5) = -1;
 			b_con.block<1, 1>(4 * i + k, 0) = -G * GAMMA_k.block<2, 1>(2, 0)*dist;
 		}
+		//cout << "G_con = " << endl << G_con << endl;
+		//cout << "b_con = " << endl << b_con << endl;
 
 		obstacle.motion(tk + t1);
 		v = obstacle.currentState.v;
@@ -363,8 +410,15 @@ void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector
 		vector<MatrixXd> coef_xyc, coef_R, coef_lambdaR;
 		Vector2d V1 = obstacle.Vertices.col(edge.edge_no.first);
 		Vector2d V2 = obstacle.Vertices.col(edge.edge_no.second);
-		
-		Taylor::Cxy(x, y, v, acc, theta, coef_xyc);
+		//cout << "V1 = " << V1 << endl;
+		//cout << "V2 = " << V2 << endl;
+		if (abs(dtheta) < 1e-3) {
+			Taylor::Cxy(x, y, v, acc, theta, coef_xyc);
+		}
+		else
+		{
+			Taylor::Cxy_dtheta(x, y, v, acc, theta, dtheta, coef_xyc);
+		}
 		Taylor::CR(alpha, dalpha, coef_R);
 		Taylor::ClambdaR(alpha, dalpha, edge.ds, edge.dsEdge, 
 			edge.s + edge.ds*t1, edge.sEdge + edge.dsEdge*t1, coef_lambdaR);
@@ -375,7 +429,12 @@ void Planner_mpc::overApprox(double s2cg, double tk, Obstacle & obstacle, vector
 		MultiplyTV(lambdaR_ap, coef_lambdaR, t_);
 		for (int k = 0; k < 4; k++) {
 			VectorXd sh = xyc_ap[k] + R_ap[k] * V1;
-			b_con.block<1, 1>(4 * i + k, 0) = sign * (b_con.block<1, 1>(4 * i + k, 0) + getH * TR*(sh + lambdaR_ap[k] * (V2 - V1)) + getH * Txy) + buffer*MatrixXd::Ones(1,1);
+//			Vector2d hcon = TR * (xyc_ap[k] + R_ap[k] * V1 + lambdaR_ap[k] * (V2 - V1)) + Txy;
+//			b_con[4 * i + k] += hcon(1)*sign - buffer;
+//			cout << "sh = " << endl << sh << endl;
+//			cout << "tmp = " << endl << std::setprecision(9) << getH*TR*( sh + lambdaR_ap[k] * (V2 - V1) )<< endl;
+			b_con.block<1, 1>(4 * i + k, 0) = sign * (b_con.block<1, 1>(4 * i + k, 0) + getH * TR*(sh + lambdaR_ap[k] * (V2 - V1)) + getH * Txy) - buffer*MatrixXd::Ones(1,1);
 		}
 	}
+//	cout << "b_con = " << endl << b_con << endl;
 }

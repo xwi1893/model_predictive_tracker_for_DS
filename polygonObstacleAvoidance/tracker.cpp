@@ -36,8 +36,6 @@ void Tracker_mpc::initialize()
 	}
 
 	const int rowH = NSTATE + 2 * NINPUT;
-	mat_H = Map<MatrixXd>(params.H, rowH, rowH);
-	cout << "mat_H = " << mat_H << endl;
 
 	// read AD
 	MatrixXd AD(NSTATE + NINPUT, NSTATE + 2 * NINPUT);
@@ -88,7 +86,9 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState, Path& planned_p
 	Waypoint p_int, ref_point;
 	interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, p_int);
 
-	VectorXd ref = VectorXd::Zero(NSTATE + 2 * NINPUT);
+	//VectorXd ref = VectorXd::Zero(NSTATE + 2 * NINPUT);
+	double ref[NSTATE + 2 * NINPUT];
+	memset(ref, 0, (NSTATE + 2 * NINPUT) * sizeof(double));
 	planned_path.pathMutex.lock();
 	if (planned_path.size() == 0) {
 		planned_path.pathMutex.unlock(); 
@@ -96,6 +96,7 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState, Path& planned_p
 	}
 	interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, ref_point);
 
+	//double* D_data = D.data();
 	for (int i = 0; i < NP; i++) {
 		ref_kr = p_int.kappa; ref_ey = ref_point.offset;
 		currentS = currentS + vx * Tc / (1 - ref_kr * ref_ey);
@@ -105,19 +106,21 @@ solver_int32_default Tracker_mpc::step(CAR_STATE * currentState, Path& planned_p
 
 		if (i == 0) {
 			eq_c = -A * xInit - D * ud;
-			memcpy(params.c + NSTATE * i, eq_c.data(), NSTATE*sizeof(double));
+			memcpy(params.c + (NSTATE + NINPUT) * i, eq_c.data(), (NSTATE + NINPUT) * sizeof(double));
 		}
 		else
 		{
 			eq_c = -D * ud;
-			memcpy(params.c + NSTATE * i, eq_c.data(), NSTATE*sizeof(double));
+			memcpy(params.c + (NSTATE + NINPUT)* i, eq_c.data(), (NSTATE + NINPUT) * sizeof(double));
+			//for (int k = 0; k < NSTATE + NINPUT; k++) {
+			//	params.c[(NSTATE + NINPUT)*i + k] = -D(k)*ud;
+			//}
 		}
 		interp<double, Waypoint>(road_ref.s, road_ref.waypoints, currentS, p_int);
 		interp<double, Waypoint>(planned_path.s, planned_path.waypoints, currentS, ref_point);
 
-		ref(3) = ref_point.theta; ref(4) = ref_point.offset;
-		ref = -mat_H * ref;
-		memcpy(params.Reference_Value + (NSTATE + 2*NINPUT)*i, ref.data(), (NSTATE+2*NINPUT)*sizeof(double));
+		ref[3] = -100 * ref_point.theta; ref[4] = -4 * ref_point.offset;
+		memcpy(params.Reference_Value + (NSTATE + 2*NINPUT)*i, ref, (NSTATE + 2 * NINPUT) * sizeof(double));
 	}
 	planned_path.pathMutex.unlock();
 
@@ -145,7 +148,7 @@ void Tracker_mpc::threadStep(CAR_STATE * p_DS_to_C, float * p_C_to_DS, Path & pl
 	int trackerStep = 0;
 	int key = 0;
 	clock_t t_start;
-	while (!terminate)
+	while (!term)
 	{
 		long cFrameCount = p_DS_to_C->lTotalFrame;
 		if (cFrameCount >= frameCount + 3)
@@ -156,7 +159,7 @@ void Tracker_mpc::threadStep(CAR_STATE * p_DS_to_C, float * p_C_to_DS, Path & pl
 			if (exit_code == OPTIMAL_MpcTracker) {
 				float next = (float)u_next[0] * RAD2DEG * Kt;
 				*p_C_to_DS = next;
-				cout << "The next steering angle is " << *p_C_to_DS << endl;
+//				cout << "The next steering angle is " << *p_C_to_DS << endl;
 			}
 			
 			if (++trackerStep >= 4) {
@@ -166,8 +169,12 @@ void Tracker_mpc::threadStep(CAR_STATE * p_DS_to_C, float * p_C_to_DS, Path & pl
 			}
 			//tracker_timeCost.emplace_back((clock() - t_start)*1.0 / CLOCKS_PER_SEC * 1000);
 		}
-
-		if (_kbhit() != 0) key = _getch();
-		if (key == 'q') terminate = true;
+		if (_kbhit() != 0) {
+			if (_getch() == 'q') {
+				planned_path.isNeedReplan = true;
+				planned_path.replanCv.notify_all();
+				term = true;
+			}
+		}
 	}
 }
