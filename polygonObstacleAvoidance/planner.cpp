@@ -59,7 +59,7 @@ void Planner_mpc::initialize(double vCar)
 {
 	vel = vCar;
 
-	//double D_array[4] = { -0.046296296296296*vel, -0.083333333333333*vel, 0, 0.1*vel};
+	//double D_array[4] = { -0.046296296296296, -0.083333333333333, 0, 0.1};
 	//memcpy(D, D_array, 4 * sizeof(double));
 	this->D = (VectorXd(NSTATE) << -0.046296296296296, -0.083333333333333, 0, 0.1).finished();
 
@@ -145,7 +145,7 @@ solver_int32_default Planner_mpc::step(CAR_STATE * currentState, Path & planned_
 		if (i > 0) {
 			eq_c = -D * vel*dkappads[i-1];
 		}
-		memcpy(params.c + NSTATE * i, eq_c.data(), sizeof(eq_c));
+		memcpy(params.c + NSTATE * i, eq_c.data(), 4*sizeof(double));
 
 		double ti = currentTime + (i + 1)*Tp;
 		MatrixXd ineq_A = MatrixXd::Zero(32, 6);
